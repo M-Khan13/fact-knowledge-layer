@@ -8,10 +8,8 @@ any claim the system makes can be checked against the source document.
 
 ## Status
 
-Phase 6 — the pipeline runs end to end behind a REST API: upload PDFs to a
-collection and get back grounded, normalized facts and the relationships
-between them, with the evidence for any fact served as an image of its page.
-The eval harness lands next; the React UI is not built yet.
+Phase 7 — the pipeline runs end to end behind a REST API, and extraction can
+be scored against a hand-labelled fact set. The React UI is not built yet.
 
 ## Layout
 
@@ -20,6 +18,7 @@ backend/            FastAPI app and configuration
 backend/pipeline/   Ingestion pipeline: parsing, grounding, extraction,
                     normalization, matching, reconciliation
 backend/app.py      REST API and a minimal debug view
+backend/evaluation.py  Scoring extraction against hand-labelled facts
 scripts/            Hand tools for inspecting the pipeline
 data/               Local SQLite database and uploaded PDFs (git-ignored)
 tests/              Unit tests, and the sample PDF they run against
@@ -274,3 +273,46 @@ from `.env`. No document path is baked into the code.
 ```bash
 pytest
 ```
+
+## Evaluating extraction
+
+```bash
+python scripts/evaluate.py --labels path/to/labels.json --input ~/path/to/pdfs
+```
+
+Labels come only from the file you point at. Nothing here invents one, and a
+missing file is an error rather than an empty run that appears to pass.
+
+The loader does not assume a layout. It inspects the JSON, maps whatever field
+names it finds onto the fields it needs, and reports the mapping it used, so a
+misread shape is visible rather than silent. It reads a plain list, a list
+under a wrapping key, or an object keyed by document name, and accepts common
+aliases (`metric`/`attribute`, `expected_value`/`value`, `units`/`unit`, and so
+on). Check how your file will be read before running anything:
+
+```bash
+python scripts/evaluate.py --labels path/to/labels.json --describe
+```
+
+Matching reuses the pipeline's own normalization, so a label written
+`8,142 ₹ Cr` matches a fact extracted as `81,415.38 ₹ million` for the same
+reason the reconciler would call them one figure. Each label is satisfied by at
+most one fact and each fact satisfies at most one label, so nothing is counted
+twice.
+
+Misses are separated by cause, because they need different fixes:
+
+- **found the attribute, disagreed on the value** — the report names the figure
+  the engine produced, which is usually the more useful failure;
+- **not extracted at all** — the engine never proposed anything for it.
+
+Two precision figures are reported. **Scoped precision** counts only unmatched
+facts whose attribute appears somewhere in the label set; **precision, all**
+counts every extracted fact. A hand-labelled set is rarely exhaustive, so the
+unscoped figure understates the engine whenever it correctly extracts something
+nobody labelled — read the scoped figure first and the listed facts to judge
+the rest.
+
+Where a label gives a page, a disagreement with the grounded page is reported
+separately: the fact still counts as found, but the discrepancy is worth
+seeing. `--json out.json` writes the whole result for tracking runs over time.
