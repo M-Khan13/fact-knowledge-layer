@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS documents (
     sha256        TEXT NOT NULL,
     page_count    INTEGER NOT NULL,
     created_at    TEXT NOT NULL,
+    -- Where the file is, so evidence can be rendered from it later.
+    path          TEXT,
     UNIQUE (collection_id, sha256)
 );
 
@@ -98,12 +100,20 @@ ADDED_COLUMNS: dict[str, str] = {
 }
 
 
+ADDED_DOCUMENT_COLUMNS: dict[str, str] = {"path": "TEXT"}
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add any columns a database made by an older version is missing."""
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
     for column, declaration in ADDED_COLUMNS.items():
         if column not in existing:
             conn.execute(f"ALTER TABLE facts ADD COLUMN {column} {declaration}")
+
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
+    for column, declaration in ADDED_DOCUMENT_COLUMNS.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE documents ADD COLUMN {column} {declaration}")
 
 
 def _now() -> str:
@@ -154,18 +164,21 @@ def upsert_document(
     filename: str,
     sha256: str,
     page_count: int,
+    path: str | None = None,
 ) -> str:
     conn.execute(
         """
         INSERT INTO documents
-            (doc_id, collection_id, source_doc, filename, sha256, page_count, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (doc_id, collection_id, source_doc, filename, sha256, page_count,
+             created_at, path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(doc_id) DO UPDATE SET
             source_doc = excluded.source_doc,
             filename   = excluded.filename,
-            page_count = excluded.page_count
+            page_count = excluded.page_count,
+            path       = COALESCE(excluded.path, documents.path)
         """,
-        (doc_id, collection_id, source_doc, filename, sha256, page_count, _now()),
+        (doc_id, collection_id, source_doc, filename, sha256, page_count, _now(), path),
     )
     return doc_id
 
@@ -349,3 +362,43 @@ def count_facts(conn: sqlite3.Connection, collection_id: str) -> int:
         "SELECT COUNT(*) AS n FROM facts WHERE collection_id = ?", (collection_id,)
     ).fetchone()
     return int(row["n"])
+
+
+def list_collections(conn: sqlite3.Connection) -> list[dict]:
+    """Every collection, with how much each one holds."""
+    rows = conn.execute(
+        """
+        SELECT c.collection_id, c.name, c.created_at,
+               (SELECT COUNT(*) FROM documents d WHERE d.collection_id = c.collection_id)
+                   AS document_count,
+               (SELECT COUNT(*) FROM facts f WHERE f.collection_id = c.collection_id)
+                   AS fact_count
+        FROM collections c
+        ORDER BY c.created_at, c.collection_id
+        """
+    )
+    return [dict(row) for row in rows]
+
+
+def get_collection(conn: sqlite3.Connection, collection_id: str) -> dict | None:
+    for row in list_collections(conn):
+        if row["collection_id"] == collection_id:
+            return row
+    return None
+
+
+def list_documents(conn: sqlite3.Connection, collection_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT d.*, (SELECT COUNT(*) FROM facts f WHERE f.doc_id = d.doc_id) AS fact_count
+        FROM documents d WHERE d.collection_id = ?
+        ORDER BY d.created_at, d.doc_id
+        """,
+        (collection_id,),
+    )
+    return [dict(row) for row in rows]
+
+
+def get_document(conn: sqlite3.Connection, doc_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
+    return dict(row) if row else None

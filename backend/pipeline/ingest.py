@@ -165,6 +165,7 @@ def ingest_pdf(
             filename=path.name,
             sha256=checksum,
             page_count=doc.page_count,
+            path=str(path.resolve()),
         )
 
         report = IngestReport(

@@ -8,9 +8,10 @@ any claim the system makes can be checked against the source document.
 
 ## Status
 
-Phase 5 — the pipeline runs end to end: PDFs parse, facts are extracted,
-grounded, normalized, matched across documents, and reconciled into
-relationships with a verdict and a reason. The REST API lands next.
+Phase 6 — the pipeline runs end to end behind a REST API: upload PDFs to a
+collection and get back grounded, normalized facts and the relationships
+between them, with the evidence for any fact served as an image of its page.
+The eval harness lands next; the React UI is not built yet.
 
 ## Layout
 
@@ -18,6 +19,7 @@ relationships with a verdict and a reason. The REST API lands next.
 backend/            FastAPI app and configuration
 backend/pipeline/   Ingestion pipeline: parsing, grounding, extraction,
                     normalization, matching, reconciliation
+backend/app.py      REST API and a minimal debug view
 scripts/            Hand tools for inspecting the pipeline
 data/               Local SQLite database and uploaded PDFs (git-ignored)
 tests/              Unit tests, and the sample PDF they run against
@@ -216,11 +218,46 @@ key is ever logged or returned by an endpoint.
 uvicorn backend.app:app --reload
 ```
 
-Then check the health probe:
+Interactive API docs are at `/docs`, and `/` is a bare debug view listing
+collections, their relationships and links to the evidence images.
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /collections` | Create a collection (or rename one) |
+| `GET /collections` | List collections with document and fact counts |
+| `GET /collections/{id}` | One collection, its documents and verdict counts |
+| `POST /collections/{id}/documents` | Upload one or more PDFs and run the pipeline |
+| `GET /collections/{id}/documents` | Documents in a collection |
+| `GET /collections/{id}/facts` | Facts, filterable by `subject`, `attribute`, `period`, `doc_id` |
+| `GET /collections/{id}/relationships` | Relationships, filterable by `verdict`, `reason_code`, `fact_id` |
+| `POST /collections/{id}/reconcile` | Re-run reconciliation over a whole collection |
+| `GET /facts/{id}` | One fact |
+| `GET /facts/{id}/evidence` | The fact's page as a PNG, with its evidence boxed |
+| `GET /health` | Liveness, and whether a key is configured |
+
+Uploading runs the pipeline **for that document only**: it is parsed,
+extracted, grounded and normalized, and then its new facts are matched against
+the facts the collection already holds. Nothing is rebuilt, so a collection
+stays cheap to add to. A document is identified by its content hash, so
+re-uploading the same file — under any name — is recognised rather than
+duplicated. Use `?max_pages=N` while experimenting.
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl -X POST localhost:8000/collections -H 'content-type: application/json' \
+     -d '{"collection_id": "macro"}'
+
+curl -X POST 'localhost:8000/collections/macro/documents?max_pages=5' \
+     -F files=@report-one.pdf -F files=@report-two.pdf
+
+curl 'localhost:8000/collections/macro/relationships?verdict=contradict'
+curl localhost:8000/facts/f_abc123def456/evidence --output evidence.png
 ```
+
+Processing is synchronous, and a full report is one model call per page — so a
+100-page upload is a long request. `max_pages` keeps it manageable; a job queue
+would be the next step if this needed to be interactive.
 
 To locate a quote in any PDF and save the highlighted page:
 

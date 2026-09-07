@@ -304,6 +304,49 @@ def ground(
     )
 
 
+def _render(
+    handle: pymupdf.Document,
+    page: int,
+    boxes: list[BBox],
+    *,
+    zoom: float,
+    colour: tuple[int, int, int],
+    alpha: int,
+    padding: float,
+) -> bytes:
+    """Rasterise one page and paint the given boxes onto it."""
+    pixmap = handle[page].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+    image = Image.open(BytesIO(pixmap.tobytes("png"))).convert("RGBA")
+
+    if boxes:
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        painter = ImageDraw.Draw(overlay)
+        for box in boxes:
+            x0, y0, x1, y1 = box
+            painter.rectangle(
+                (
+                    (x0 - padding) * zoom,
+                    (y0 - padding) * zoom,
+                    (x1 + padding) * zoom,
+                    (y1 + padding) * zoom,
+                ),
+                fill=(*colour, alpha),
+                outline=(*colour, 255),
+                width=2,
+            )
+        image = Image.alpha_composite(image, overlay)
+
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _as_boxes(bbox: BBox | list[BBox] | None) -> list[BBox]:
+    if bbox is None:
+        return []
+    return [bbox] if isinstance(bbox, tuple) else [tuple(box) for box in bbox]
+
+
 def render_page(
     doc: ParsedDoc,
     page: int,
@@ -318,30 +361,36 @@ def render_page(
     if not 0 <= page < doc.page_count:
         raise IndexError(f"Page {page} out of range for {doc.source_doc}")
 
-    pixmap = doc.handle[page].get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
-    image = Image.open(BytesIO(pixmap.tobytes("png"))).convert("RGBA")
+    return _render(
+        doc.handle, page, _as_boxes(bbox),
+        zoom=zoom, colour=colour, alpha=alpha, padding=padding,
+    )
 
-    boxes: list[BBox] = []
-    if bbox is not None:
-        boxes = [bbox] if isinstance(bbox, tuple) else list(bbox)
 
-    if boxes:
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        painter = ImageDraw.Draw(overlay)
-        for box in boxes:
-            x0, y0, x1, y1 = box
-            scaled = (
-                (x0 - padding) * zoom,
-                (y0 - padding) * zoom,
-                (x1 + padding) * zoom,
-                (y1 + padding) * zoom,
-            )
-            painter.rectangle(scaled, fill=(*colour, alpha), outline=(*colour, 255), width=2)
-        image = Image.alpha_composite(image, overlay)
+def render_page_from_file(
+    path,
+    page: int,
+    bbox: BBox | list[BBox] | None = None,
+    *,
+    zoom: float = 2.0,
+    colour: tuple[int, int, int] = (255, 202, 40),
+    alpha: int = 90,
+    padding: float = 1.5,
+) -> bytes:
+    """Render one page of a PDF on disk, without parsing the whole document.
 
-    buffer = BytesIO()
-    image.convert("RGB").save(buffer, format="PNG")
-    return buffer.getvalue()
+    Serving evidence should not cost a full parse of a hundred-page report.
+    """
+    handle = pymupdf.open(path)
+    try:
+        if not 0 <= page < handle.page_count:
+            raise IndexError(f"Page {page} out of range for {path}")
+        return _render(
+            handle, page, _as_boxes(bbox),
+            zoom=zoom, colour=colour, alpha=alpha, padding=padding,
+        )
+    finally:
+        handle.close()
 
 
 def render_grounding(doc: ParsedDoc, grounding: Grounding, **kwargs) -> bytes:
