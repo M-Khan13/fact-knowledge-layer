@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+python-multipart
+
+PyMuPDF
+pdfplumber
+
+google-generativeai
+numpy
+
+pytest
+httpx
