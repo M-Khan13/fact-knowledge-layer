@@ -118,13 +118,13 @@ def strip_code_fences(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def extract_json_array(text: str) -> str | None:
-    """Pull the outermost JSON array out of surrounding prose.
+def _extract_bracketed(text: str, opener: str, closer: str) -> str | None:
+    """Pull the outermost bracketed block out of surrounding prose.
 
-    Bracket counting is string- and escape-aware, so a `]` inside a quoted
-    evidence span does not end the array early.
+    Bracket counting is string- and escape-aware, so a bracket inside a quoted
+    evidence span does not end the block early.
     """
-    start = text.find("[")
+    start = text.find(opener)
     if start == -1:
         return None
 
@@ -146,14 +146,24 @@ def extract_json_array(text: str) -> str | None:
 
         if char == '"':
             in_string = True
-        elif char == "[":
+        elif char == opener:
             depth += 1
-        elif char == "]":
+        elif char == closer:
             depth -= 1
             if depth == 0:
                 return text[start : position + 1]
 
     return None
+
+
+def extract_json_array(text: str) -> str | None:
+    """The outermost JSON array in a response."""
+    return _extract_bracketed(text, "[", "]")
+
+
+def extract_json_object(text: str) -> str | None:
+    """The outermost JSON object in a response."""
+    return _extract_bracketed(text, "{", "}")
 
 
 def coerce_fact(raw: object) -> dict | None:
@@ -276,15 +286,20 @@ def generate_text(
     prompt: str,
     *,
     model: str | None = None,
+    response_schema=None,
     max_attempts: int = MAX_ATTEMPTS,
     sleep=time.sleep,
 ) -> str:
-    """Call the model, retrying rate limits and transient server errors."""
+    """Call the model, retrying rate limits and transient server errors.
+
+    ``response_schema`` shapes the structured output; it defaults to a list of
+    facts, which is what extraction wants. Other callers pass their own.
+    """
     from google.genai import errors, types
 
     config_kwargs = types.GenerateContentConfig(
         response_mime_type="application/json",
-        response_schema=list[ExtractedFact],
+        response_schema=response_schema if response_schema is not None else list[ExtractedFact],
         temperature=0.0,
     )
 

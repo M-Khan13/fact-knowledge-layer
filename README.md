@@ -8,9 +8,9 @@ any claim the system makes can be checked against the source document.
 
 ## Status
 
-Phase 4 — PDFs parse, facts are extracted, grounded, normalized into a context
-signature, stored, and matched into candidate pairs across documents.
-Reconciliation lands in the next phase.
+Phase 5 — the pipeline runs end to end: PDFs parse, facts are extracted,
+grounded, normalized, matched across documents, and reconciled into
+relationships with a verdict and a reason. The REST API lands next.
 
 ## Layout
 
@@ -140,6 +140,45 @@ against real embeddings**. Every threshold is a parameter for that reason.
 Matching is incremental: passing the new document's fact ids restricts results
 to pairs involving them, so adding a document never re-examines the pairs a
 collection already had.
+
+## Reconciliation
+
+Every verdict is reached deterministically. A model never chooses one — it only
+writes the sentence explaining a verdict already decided, and may lower the
+confidence on a marginal case. The reason code proves the logic; the reason
+text explains it.
+
+The order of checks is the design:
+
+1. **Units first.** Two values that cannot be compared are never contradicted,
+   whatever the numbers say. No unit, an unresolvable unit, mismatched families
+   or two different currencies all produce `no-verdict` / `unit_missing`.
+2. **Context next.** Facts holding under different conditions are
+   `reconcilable`, however far apart their values are.
+3. **Values last**, once the two facts are known to describe the same thing
+   under the same conditions.
+
+| Verdict | Reason code | When |
+|---|---|---|
+| `corroborate` | `same_value` | same context, values agree |
+| `corroborate` | `unit_diff_resolved` | agree once both units resolve to one base |
+| `contradict` | `value_conflict` | same context, values outside the band |
+| `reconcilable` | `period_subset` | one period contains the other |
+| `reconcilable` | `period_diff` | different, non-nested periods |
+| `reconcilable` | `scope_diff` | consolidated against standalone |
+| `reconcilable` | `basis_diff` | a different measure |
+| `reconcilable` | `vintage_revision` | same period at a different stage of revision |
+| `no-verdict` | `unit_missing` | the two cannot be compared at all |
+
+Where several context fields differ, period decides the reason — a figure for a
+different span of time is a different figure whatever else also changed — and
+every differing field is recorded alongside it.
+
+**The adjudicator's limits are enforced in code, not asked for in a prompt.** A
+reply proposing a different verdict is discarded; a confidence above the
+deterministic one is clamped down. Every relationship carries an explanation
+written by the rules before the model is ever called, so reconciliation works
+with no API key at all — adjudication only improves the wording.
 
 ## Ingesting documents
 
