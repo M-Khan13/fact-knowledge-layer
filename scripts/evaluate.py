@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import config, evaluation, store  # noqa: E402
-from backend.pipeline.ingest import ingest_pdf  # noqa: E402
+from backend.pipeline.ingest import ingest_pdf, parse_page_ranges  # noqa: E402
 
 
 def find_documents(labels, input_dir: Path) -> tuple[list[Path], list[str]]:
@@ -49,6 +49,22 @@ def find_documents(labels, input_dir: Path) -> tuple[list[Path], list[str]]:
     return found, missing
 
 
+def pages_for_document(labels, path: Path, pad: int = 0) -> set[int]:
+    """The pages this document's labels cite, optionally with neighbours.
+
+    Lets a run read only where the labelled facts actually are, which is the
+    difference between a handful of calls and a whole corpus.
+    """
+    stem = path.stem.lower()
+    pages: set[int] = set()
+    for label in labels:
+        if label.document and Path(label.document).stem.lower() != stem:
+            continue
+        for page in label.pages:
+            pages.update(range(max(1, page - pad), page + pad + 1))
+    return pages
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -61,6 +77,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", help="database path; overrides DATABASE_PATH")
     parser.add_argument("--model", help="extraction model")
     parser.add_argument("--max-pages", type=int, help="only read the first N pages")
+    parser.add_argument(
+        "--pages", help="only read these 1-based pages, e.g. '3-5,10,14'"
+    )
+    parser.add_argument(
+        "--label-pages",
+        action="store_true",
+        help="read only the pages the labels cite, per document",
+    )
+    parser.add_argument(
+        "--pad-pages",
+        type=int,
+        default=0,
+        help="with --label-pages, also read this many pages either side",
+    )
     parser.add_argument(
         "--describe",
         action="store_true",
@@ -104,8 +134,20 @@ def main(argv: list[str] | None = None) -> int:
                     f"None of the labelled documents were found in {input_dir}."
                 )
 
+            try:
+                explicit_pages = parse_page_ranges(args.pages)
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from None
+
             print(f"\nIngesting {len(documents)} document(s) into '{args.collection}':")
             for path in documents:
+                wanted = explicit_pages
+                if args.label_pages:
+                    wanted = pages_for_document(loaded.labels, path, args.pad_pages)
+                    if not wanted:
+                        print(f"    {path.stem}: no pages cited, skipped")
+                        continue
+                    print(f"    {path.stem}: pages {sorted(wanted)}")
                 try:
                     report = ingest_pdf(
                         path,
@@ -113,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                         conn,
                         model=args.model,
                         max_pages=args.max_pages,
+                        pages=wanted,
                     )
                 except RuntimeError as exc:
                     raise SystemExit(str(exc)) from None

@@ -42,6 +42,21 @@ REQUIRE_EXACT_SPANS = os.getenv("REQUIRE_EXACT_SPANS", "true").strip().lower() i
 }
 
 
+# Thinking tokens are billed as output and dominated the cost of a trial run,
+# so the budget is capped. Extraction is a mechanical copying task rather than
+# a reasoning one. Set to -1 to let the model decide.
+THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "512"))
+
+# Seconds to leave between model calls, to stay inside a per-minute quota.
+REQUEST_DELAY_SECONDS = float(os.getenv("REQUEST_DELAY_SECONDS", "6.0"))
+
+# A fact carrying a unit is a measurement, so its value must contain a digit.
+# Values without a unit are left alone, so a status or a role still gets through.
+REQUIRE_DIGIT_WITH_UNIT = os.getenv("REQUIRE_DIGIT_WITH_UNIT", "true").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+
+
 def has_gemini_key() -> bool:
     """True when an API key is configured. Never exposes the key itself."""
     return bool(GEMINI_API_KEY.strip())

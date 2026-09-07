@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import config, store  # noqa: E402
-from backend.pipeline.ingest import ingest_pdf  # noqa: E402
+from backend.pipeline.ingest import ingest_pdf, parse_page_ranges  # noqa: E402
 
 
 def collect_pdfs(pdfs: list[str] | None, input_dir: str | None) -> list[Path]:
@@ -47,11 +47,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", help="extraction model; overrides GEMINI_EXTRACTION_MODEL")
     parser.add_argument("--max-pages", type=int, help="only read the first N pages")
     parser.add_argument(
+        "--pages", help="only read these 1-based pages, e.g. '3-5,10,14'"
+    )
+    parser.add_argument(
         "--force", action="store_true", help="re-ingest documents already stored"
     )
     args = parser.parse_args(argv)
 
     paths = collect_pdfs(args.pdf, args.input)
+    try:
+        wanted_pages = parse_page_ranges(args.pages)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
 
     with store.session(args.db) as conn:
         store.upsert_collection(conn, args.collection)
@@ -65,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
                     conn,
                     model=args.model,
                     max_pages=args.max_pages,
+                    pages=wanted_pages,
                     skip_if_present=not args.force,
                 )
             except RuntimeError as exc:

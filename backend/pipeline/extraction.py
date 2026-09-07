@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 from dataclasses import dataclass
 
@@ -23,6 +24,11 @@ from backend import config
 
 MAX_ATTEMPTS = 4
 BASE_BACKOFF_SECONDS = 1.0
+
+# When the last model call finished, so calls can be spaced out. A free-tier
+# quota is per minute, and going over it costs far more time in backoff than
+# waiting politely does.
+_last_call_at: float | None = None
 
 # Retried: rate limiting and transient server faults.
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
@@ -103,6 +109,12 @@ Rules:
 - If a value has no resolvable unit (a bare number), still extract it with "unit": null and
   a lower confidence — do not drop it, and do not invent a unit.
 - Skip running headers, footers, page numbers, and narrative that states no concrete value.
+- A value must be something the page states concretely: a quantity, a date, a
+  status, a name, or an identifier. Do NOT emit a judgement of degree or quality
+  as a value ("strong", "benign", "robust", "well contained", "above trend",
+  "resilient", "subdued"). Where the page offers only an adjective in place of a
+  figure, there is no fact to extract. Do NOT extract table-of-contents entries,
+  chapter or section numbers, page references, or contact details.
 - NEVER output a value that is not present in the page text. NEVER output an evidence_span
   that is not a verbatim substring of the page text.
 """
@@ -129,6 +141,8 @@ class ExtractionResult:
     error: str | None = None
     # Facts the model proposed whose quote was not actually on the page.
     unverbatim: int = 0
+    # Measurements proposed with no number in them.
+    valueless: int = 0
 
 
 def strip_code_fences(text: str) -> str:
@@ -313,6 +327,37 @@ def is_verbatim(evidence_span: str, page_text: str, *, exact: bool = True) -> bo
     return " ".join(evidence_span.split()) in " ".join(page_text.split())
 
 
+_DIGIT = re.compile(r"\d")
+
+
+def is_numeric_claim(fact: dict) -> bool:
+    """Whether a fact presents itself as a measurement.
+
+    A stated unit is the signal. A fact without one may still be a real fact -
+    a role, a status, a date - so it is not held to the same rule.
+    """
+    return bool((fact.get("unit") or "").strip())
+
+
+def drop_valueless(
+    facts: list[dict], *, require_digit_with_unit: bool = True
+) -> tuple[list[dict], list[dict]]:
+    """Discard measurements that carry no number.
+
+    "6.5 percent" is a measurement; "strong percent" is not. Facts with no unit
+    pass through untouched, so a board status or a job title survives.
+    """
+    if not require_digit_with_unit:
+        return list(facts), []
+
+    kept, rejected = [], []
+    for fact in facts:
+        numeric = is_numeric_claim(fact)
+        ok = (not numeric) or bool(_DIGIT.search(fact.get("value_raw") or ""))
+        (kept if ok else rejected).append(fact)
+    return kept, rejected
+
+
 def drop_unverbatim(
     facts: list[dict], page_text: str, *, exact: bool = True
 ) -> tuple[list[dict], list[dict]]:
@@ -340,6 +385,30 @@ def _status_of(exc: Exception) -> int | None:
     return getattr(exc, "code", None) or getattr(exc, "status_code", None)
 
 
+def throttle(delay: float | None = None, *, sleep=time.sleep, now=time.monotonic) -> float:
+    """Wait until enough time has passed since the previous call.
+
+    Returns how long it waited. Spacing requests is cheaper than being refused
+    and backing off, and it keeps a long run inside a per-minute quota.
+    """
+    global _last_call_at
+
+    gap = config.REQUEST_DELAY_SECONDS if delay is None else delay
+    if gap <= 0:
+        _last_call_at = now()
+        return 0.0
+
+
+    waited = 0.0
+    if _last_call_at is not None:
+        elapsed = now() - _last_call_at
+        if elapsed < gap:
+            waited = gap - elapsed
+            sleep(waited)
+    _last_call_at = now()
+    return waited
+
+
 def _sleep_for(attempt: int) -> float:
     """Exponential backoff with jitter, so retries do not sync up."""
     return BASE_BACKOFF_SECONDS * (2**attempt) * (0.5 + random.random())
@@ -362,16 +431,23 @@ def generate_text(
     """
     from google.genai import errors, types
 
+    thinking = (
+        types.ThinkingConfig(thinking_budget=config.THINKING_BUDGET)
+        if config.THINKING_BUDGET >= 0
+        else None
+    )
     config_kwargs = types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=response_schema if response_schema is not None else list[ExtractedFact],
         system_instruction=system_instruction,
+        thinking_config=thinking,
         temperature=0.0,
     )
 
     last_error: Exception | None = None
     for attempt in range(max_attempts):
         try:
+            throttle(sleep=sleep)
             response = client.models.generate_content(
                 model=model or config.GEMINI_EXTRACTION_MODEL,
                 contents=prompt,
@@ -429,12 +505,18 @@ def extract_page_facts(
                 sleep=sleep,
             )
             proposed = parse_fact_payload(raw)
-            kept, rejected = drop_unverbatim(proposed, page_text, exact=exact_spans)
+            grounded_spans, unverbatim = drop_unverbatim(
+                proposed, page_text, exact=exact_spans
+            )
+            kept, valueless = drop_valueless(
+                grounded_spans, require_digit_with_unit=config.REQUIRE_DIGIT_WITH_UNIT
+            )
             return ExtractionResult(
                 page_index=page_index,
                 facts=kept,
                 attempts=attempt + 1,
-                unverbatim=len(rejected),
+                unverbatim=len(unverbatim),
+                valueless=len(valueless),
             )
         except FactJSONError as exc:
             if attempt == 0:

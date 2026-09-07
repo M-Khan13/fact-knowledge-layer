@@ -151,8 +151,9 @@ def test_identical_facts_within_a_document_collapse(db, fixture_path, parsed_doc
     assert report.grounded == 1
 
 
-def test_a_paraphrased_quote_is_rejected(db, fixture_path, parsed_doc):
-    """Words lifted from the page but re-spaced are not a verbatim span."""
+def test_a_paraphrased_quote_is_rejected(db, fixture_path, parsed_doc, monkeypatch):
+    """Words lifted from the page but re-spaced are not an exact span."""
+    monkeypatch.setattr("backend.config.REQUIRE_EXACT_SPANS", True)
     page = parsed_doc.page(0)
     reworded = " ".join(quote_on(page, 10, 14).split())  # collapsed whitespace
     payload = json.dumps(
@@ -232,3 +233,35 @@ def test_ingest_without_a_key_fails_loudly(db, fixture_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         ingest_pdf(fixture_path, "sample", db)
+
+
+def test_only_the_requested_pages_are_read(db, fixture_path, parsed_doc):
+    """A run can target where the facts are instead of paying for a document."""
+    wanted = parsed_doc.page(1)  # page number 2
+    reply = json.dumps(
+        [
+            {
+                "subject": "Sample Entity",
+                "attribute": "measure",
+                "value_raw": "1",
+                "evidence_span": quote_on(wanted, 10, 14),
+                "confidence": 0.9,
+            }
+        ]
+    )
+    client = ScriptedClient([reply])
+
+    report = ingest_pdf(fixture_path, "sample", db, client=client, pages={2})
+
+    assert report.pages_processed == 1
+    assert client.calls == 1, "only the requested page costs a call"
+    assert {fact.page for fact in report.facts} == {2}
+
+
+def test_requesting_pages_a_document_does_not_have_reads_nothing(db, fixture_path, parsed_doc):
+    client = ScriptedClient([])
+
+    report = ingest_pdf(fixture_path, "sample", db, client=client, pages={9999})
+
+    assert report.pages_processed == 0
+    assert client.calls == 0

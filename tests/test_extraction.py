@@ -16,6 +16,7 @@ from backend.pipeline.extraction import (
     FactJSONError,
     build_prompt,
     drop_unverbatim,
+    drop_valueless,
     is_verbatim,
     coerce_fact,
     extract_json_array,
@@ -279,3 +280,70 @@ def test_relaxed_matching_forgives_whitespace_but_nothing_else():
     # Relaxing whitespace must not let a fabricated span through.
     assert not is_verbatim("12.4 units. Another line", PAGE_TEXT, exact=False)
     assert not is_verbatim("a span the page never had", PAGE_TEXT, exact=False)
+
+
+# --- Cost and quota controls ----------------------------------------------
+
+
+def test_calls_are_spaced_to_respect_a_quota():
+    clock, waits = [100.0], []
+
+    def now():
+        return clock[0]
+
+    import backend.pipeline.extraction as extraction
+
+    extraction._last_call_at = None
+    assert extraction.throttle(2.0, sleep=waits.append, now=now) == 0.0
+
+    clock[0] = 100.5
+    assert extraction.throttle(2.0, sleep=waits.append, now=now) == pytest.approx(1.5)
+
+    clock[0] = 110.0
+    assert extraction.throttle(2.0, sleep=waits.append, now=now) == 0.0
+    assert waits == [pytest.approx(1.5)]
+
+
+def test_a_zero_delay_never_waits():
+    import backend.pipeline.extraction as extraction
+
+    extraction._last_call_at = None
+    waits = []
+    extraction.throttle(0.0, sleep=waits.append, now=lambda: 1.0)
+    extraction.throttle(0.0, sleep=waits.append, now=lambda: 1.0)
+
+    assert waits == []
+
+
+def test_a_measurement_without_a_number_is_dropped():
+    """A unit says this is a measurement, so it needs a figure."""
+    facts = [
+        {"unit": "percent", "value_raw": "6.5"},
+        {"unit": "percent", "value_raw": "strong"},
+        {"unit": "USD_billion", "value_raw": "441.4"},
+    ]
+
+    kept, dropped = drop_valueless(facts)
+
+    assert [f["value_raw"] for f in kept] == ["6.5", "441.4"]
+    assert [f["value_raw"] for f in dropped] == ["strong"]
+
+
+def test_a_fact_with_no_unit_keeps_its_text_value():
+    """A board status or a job title is a fact, and has no number in it."""
+    facts = [
+        {"unit": None, "value_raw": "resigned w.e.f. 24 Aug 2023"},
+        {"unit": "", "value_raw": "Managing Director & CEO"},
+    ]
+
+    kept, dropped = drop_valueless(facts)
+
+    assert len(kept) == 2 and dropped == []
+
+
+def test_the_digit_rule_can_be_turned_off():
+    facts = [{"unit": "percent", "value_raw": "strong"}]
+
+    kept, dropped = drop_valueless(facts, require_digit_with_unit=False)
+
+    assert len(kept) == 1 and dropped == []

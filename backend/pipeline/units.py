@@ -96,7 +96,13 @@ class ResolvedUnit:
 
 
 def _clean(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).replace("−", "-").strip()
+    text = unicodedata.normalize("NFKC", text).replace("\u2212", "-").strip()
+    # A PDF line break can land inside a number, so a value copied verbatim
+    # arrives as "441.\n4". Only whitespace touching a decimal point is closed
+    # up: joining any two digits would silently fuse "9.7 7.6", two values from
+    # neighbouring table columns, into one number that was never printed.
+    text = re.sub(r"(?<=\.)\s+(?=\d)", "", text)
+    return re.sub(r"(?<=\d)\s+(?=\.)", "", text)
 
 
 def parse_number(value: str | None) -> float | None:

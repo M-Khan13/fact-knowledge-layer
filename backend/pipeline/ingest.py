@@ -58,6 +58,37 @@ class IngestReport:
         )
 
 
+def parse_page_ranges(spec: str | None) -> set[int] | None:
+    """Read a page selection like "3-5,10,14" into the pages it names.
+
+    Page numbers are 1-based, matching how a citation is written. None means
+    every page.
+    """
+    if not spec or not spec.strip():
+        return None
+
+    pages: set[int] = set()
+    for part in spec.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part.lstrip("-"):
+            first, _, last = part.partition("-")
+            try:
+                start, end = int(first), int(last)
+            except ValueError:
+                raise ValueError(f"Not a page range: {part!r}") from None
+            if start > end:
+                start, end = end, start
+            pages.update(range(start, end + 1))
+        else:
+            try:
+                pages.add(int(part))
+            except ValueError:
+                raise ValueError(f"Not a page number: {part!r}") from None
+    return pages or None
+
+
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -133,6 +164,7 @@ def ingest_pdf(
     client=None,
     model: str | None = None,
     max_pages: int | None = None,
+    pages: set[int] | None = None,
     min_score: float = DEFAULT_MIN_SCORE,
     skip_if_present: bool = True,
     on_page=None,
@@ -177,10 +209,16 @@ def ingest_pdf(
             page_count=doc.page_count,
         )
 
-        pages = doc.pages if max_pages is None else doc.pages[:max_pages]
+        selected = doc.pages
+        if pages is not None:
+            # Only the pages asked for, so a run can target where facts live
+            # instead of paying for a whole document.
+            selected = [page for page in selected if page.number in pages]
+        if max_pages is not None:
+            selected = selected[:max_pages]
         seen: set[str] = set()
 
-        for page in pages:
+        for page in selected:
             result = extract_page_facts(
                 client,
                 page.text,

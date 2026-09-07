@@ -46,6 +46,15 @@ def no_live_api_calls(monkeypatch):
     supplies a scripted one instead.
     """
     monkeypatch.setattr("backend.config.GEMINI_API_KEY", "", raising=False)
+    # No inter-call delay either: the throttle exists to respect a live quota,
+    # and a scripted client has none.
+    monkeypatch.setattr("backend.config.REQUEST_DELAY_SECONDS", 0.0, raising=False)
+    monkeypatch.setattr("backend.pipeline.extraction._last_call_at", None, raising=False)
+    # Pin every extraction policy to the code default, so what happens to be in
+    # a developer's .env can never change whether a test passes.
+    monkeypatch.setattr("backend.config.REQUIRE_EXACT_SPANS", True, raising=False)
+    monkeypatch.setattr("backend.config.REQUIRE_DIGIT_WITH_UNIT", True, raising=False)
+    monkeypatch.setattr("backend.config.THINKING_BUDGET", 512, raising=False)
 
 
 @pytest.fixture(scope="session")
