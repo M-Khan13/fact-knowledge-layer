@@ -233,12 +233,15 @@ def test_generate_does_not_retry_a_bad_request():
 
 
 def test_generate_gives_up_after_max_attempts():
+    """A limit still refusing after every retry is reported as exhaustion."""
+    from backend.pipeline.extraction import QuotaExhausted
+
     rate_limited = [
         errors.ClientError(429, {"error": {"message": "slow down"}}) for _ in range(3)
     ]
     client = StubClient(rate_limited)
 
-    with pytest.raises(errors.ClientError):
+    with pytest.raises(QuotaExhausted):
         generate_text(client, "prompt", max_attempts=3, sleep=lambda _s: None)
     assert client.calls == 3
 
@@ -385,3 +388,17 @@ def test_quota_details_reads_the_server_reply():
         False,
         None,
     )
+
+
+def test_a_limit_that_outlives_every_retry_is_reported_as_exhaustion():
+    """Repeated refusal is not a blip, and the caller needs to know that."""
+    from backend.pipeline.extraction import QuotaExhausted
+
+    refusals = [
+        errors.ClientError(429, {"error": {"message": "Too many requests. retry in 1s"}})
+        for _ in range(3)
+    ]
+    client = StubClient(refusals)
+
+    with pytest.raises(QuotaExhausted):
+        generate_text(client, "prompt", max_attempts=3, sleep=lambda _s: None)

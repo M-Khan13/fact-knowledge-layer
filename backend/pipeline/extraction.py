@@ -481,21 +481,22 @@ def generate_text(
             return response.text or ""
         except errors.APIError as exc:
             status = _status_of(exc)
+
             if status == 429:
                 daily, retry_after = _quota_details(exc)
-                if daily:
-                    # Retrying cannot help and would spend more of the quota.
+                # A per-day limit cannot clear by waiting, and one that is still
+                # refusing after every retry is not a passing blip either.
+                if daily or attempt == max_attempts - 1:
                     raise QuotaExhausted(
-                        "The API quota for this model is exhausted and will not "
-                        "clear by retrying. Wait for the quota window to reset, "
-                        "raise the limit, or switch model. Work already finished "
-                        "has been saved."
+                        "The API quota is exhausted and is not clearing by "
+                        "retrying. Wait for the quota window to reset, raise the "
+                        "limit, or switch model. Work already finished is saved."
                     ) from exc
-                if attempt < max_attempts - 1:
-                    last_error = exc
-                    # The server says how long to wait; believe it over a guess.
-                    sleep(retry_after if retry_after else _sleep_for(attempt))
-                    continue
+                last_error = exc
+                # The server says how long to wait; believe it over a guess.
+                sleep(retry_after if retry_after else _sleep_for(attempt))
+                continue
+
             if status not in RETRYABLE_STATUS or attempt == max_attempts - 1:
                 raise
             last_error = exc

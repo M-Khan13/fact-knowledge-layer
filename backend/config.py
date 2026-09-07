@@ -22,7 +22,7 @@ def _path_setting(name: str, default: str) -> Path:
 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_EXTRACTION_MODEL = os.getenv("GEMINI_EXTRACTION_MODEL", "gemini-2.5-flash")
+GEMINI_EXTRACTION_MODEL = os.getenv("GEMINI_EXTRACTION_MODEL", "gemini-3.6-flash")
 GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
 
 DATABASE_PATH = _path_setting("DATABASE_PATH", "data/facts.db")
@@ -42,10 +42,10 @@ REQUIRE_EXACT_SPANS = os.getenv("REQUIRE_EXACT_SPANS", "true").strip().lower() i
 }
 
 
-# Thinking tokens are billed as output and dominated the cost of a trial run,
-# so the budget is capped. Extraction is a mechanical copying task rather than
-# a reasoning one. Set to -1 to let the model decide.
-THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "512"))
+# Thinking tokens bill as output, but a budget set too low starves the
+# multi-column work a dense table needs and facts go missing. Coverage is worth
+# more than the tokens. Set to -1 to let the model decide.
+THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "2048"))
 
 # Seconds to leave between model calls, to stay inside a per-minute quota.
 REQUEST_DELAY_SECONDS = float(os.getenv("REQUEST_DELAY_SECONDS", "6.0"))
