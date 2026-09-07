@@ -115,7 +115,7 @@ def test_alternative_field_names_are_recognised(tmp_path):
     assert label.value == "8,142"
     assert label.unit == "₹ Cr"
     assert label.period == "FY24"
-    assert label.page == 12
+    assert label.pages == [12]
     assert loaded.recognised_fields["value"] == "expected_value"
 
 
@@ -125,7 +125,7 @@ def test_field_names_are_matched_case_insensitively(tmp_path):
     label = load_labels(path).labels[0]
 
     assert label.attribute == "revenue"
-    assert label.page == 3
+    assert label.pages == [3]
 
 
 def test_numeric_values_survive_being_read(tmp_path):
@@ -207,7 +207,7 @@ def label_from(**fields):
         scope=fields.get("scope"),
         basis=fields.get("basis"),
         vintage=fields.get("vintage"),
-        page=fields.get("page"),
+        pages=fields.get("pages", [fields["page"]] if fields.get("page") else []),
         raw={},
     )
 
@@ -414,6 +414,7 @@ def test_results_serialise_for_tracking_over_time():
     assert len(payload["misses"]) == 1
     assert payload["misses"][0]["cause"] == MISS_NOT_EXTRACTED
     assert payload["page_disagreements"][0]["grounded_page"] == 7
+    assert payload["page_disagreements"][0]["label_pages"] == [12]
     assert json.dumps(payload)
 
 
@@ -435,3 +436,34 @@ def test_values_match_falls_back_to_text_when_nothing_resolves():
     assert not values_match(
         label_from(value="Yes"), make_fact("listed", "No", unit=None)
     )
+
+
+def test_a_label_may_cite_several_pages(tmp_path):
+    """A fact often appears on more than one page of the same document."""
+    path = write_labels(
+        tmp_path,
+        [
+            {"attribute": "a", "value": "1", "page": [6, 9, 17]},
+            {"attribute": "b", "value": "2", "page": "6, 9, 17"},
+            {"attribute": "c", "value": "3", "page": 22},
+            {"attribute": "d", "value": "4"},
+        ],
+    )
+
+    labels = load_labels(path).labels
+
+    assert labels[0].pages == [6, 9, 17]
+    assert labels[1].pages == [6, 9, 17]
+    assert labels[2].pages == [22]
+    assert labels[3].pages == []
+    assert labels[0].page == 6
+
+
+def test_any_cited_page_counts_as_agreement():
+    labels = [label_from(attribute="revenue", value="8,142", unit="₹ Cr", pages=[6, 9, 17])]
+
+    agreed = evaluate(labels, [make_fact("revenue", "8,142", page=9)])
+    disagreed = evaluate(labels, [make_fact("revenue", "8,142", page=4)])
+
+    assert agreed.page_disagreements == []
+    assert len(disagreed.page_disagreements) == 1

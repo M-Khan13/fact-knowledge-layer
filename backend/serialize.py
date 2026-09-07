@@ -101,6 +101,7 @@ def ingest_report_to_dict(report) -> dict:
         "pages_processed": report.pages_processed,
         "facts_proposed": report.proposed,
         "facts_stored": report.grounded,
+        "dropped_unverbatim": report.unverbatim,
         "dropped_ungrounded": report.dropped_ungrounded,
         "duplicates": report.duplicates,
         "without_resolved_unit": report.unresolved_units,

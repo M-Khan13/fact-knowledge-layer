@@ -8,6 +8,7 @@ the page numbers these tests assert on are derived, not asserted into being.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,18 @@ class ScriptedClient:
         return type("Response", (), {"text": reply})()
 
 
+@pytest.fixture(autouse=True)
+def no_live_api_calls(monkeypatch):
+    """Keep the suite hermetic whatever is in .env.
+
+    With a real key configured the pipeline would reach for the live API -
+    picking the Gemini embedder, or calling the adjudicator - which would make
+    the tests slow, costly and non-deterministic. Every test that needs a model
+    supplies a scripted one instead.
+    """
+    monkeypatch.setattr("backend.config.GEMINI_API_KEY", "", raising=False)
+
+
 @pytest.fixture(scope="session")
 def fixture_path() -> Path:
     return FIXTURE
@@ -47,8 +60,20 @@ def parsed_doc():
 
 
 def quote_on(page, start: int = 10, length: int = 14) -> str:
-    """A verbatim quote taken from the words actually on that page."""
-    return " ".join(word.text for word in page.words[start : start + length])
+    """A verbatim quote: a genuine substring of the page text.
+
+    Sliced out of `page.text` rather than rebuilt by joining words, because
+    extraction now discards any span that is not character-for-character
+    present on the page — and a word-joined span is not, since the page text
+    carries its own line breaks and spacing.
+    """
+    runs = list(re.finditer(r"\S+", page.text))
+    if len(runs) <= start:
+        start = 0
+    chosen = runs[start : start + length]
+    if not chosen:
+        return ""
+    return page.text[chosen[0].start() : chosen[-1].end()]
 
 
 def scripted_replies(doc, per_page: int = 2):
@@ -71,6 +96,8 @@ def scripted_replies(doc, per_page: int = 2):
                     "subject": "Sample Entity",
                     "attribute": f"measure_{slot}",
                     "value_raw": str(slot),
+                    "context": {"period": None, "scope": None, "basis": None,
+                                "vintage": None},
                     "evidence_span": quote,
                     "confidence": 0.9,
                 }

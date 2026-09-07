@@ -37,6 +37,7 @@ class IngestReport:
     dropped_ungrounded: int = 0
     duplicates: int = 0
     unresolved_units: int = 0
+    unverbatim: int = 0
     failed_pages: list[int] = field(default_factory=list)
     facts: list[Fact] = field(default_factory=list)
     skipped: bool = False
@@ -51,7 +52,8 @@ class IngestReport:
         return (
             f"{self.source_doc}: {self.grounded} facts from {self.pages_processed} pages "
             f"({self.proposed} proposed, {self.dropped_ungrounded} dropped as ungrounded, "
-            f"{self.duplicates} duplicate, {len(self.failed_pages)} pages failed, "
+            f"{self.duplicates} duplicate, {self.unverbatim} quotes not verbatim, "
+            f"{len(self.failed_pages)} pages failed, "
             f"{self.unresolved_units} without a resolved unit)"
         )
 
@@ -183,10 +185,12 @@ def ingest_pdf(
                 client,
                 page.text,
                 page_index=page.index,
-                tables=[table.rows for table in page.tables] or None,
+                doc_stem=doc.source_doc,
+                page_number=page.number,
                 model=model,
             )
             report.pages_processed += 1
+            report.unverbatim += result.unverbatim
             if result.error:
                 report.failed_pages.append(page.number)
 

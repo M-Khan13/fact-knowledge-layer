@@ -32,67 +32,91 @@ class FactJSONError(ValueError):
     """The model's response could not be read as a list of facts."""
 
 
-class ExtractedFact(BaseModel):
-    """What the model returns per fact. Grounding fields are absent by design."""
+class ExtractedContext(BaseModel):
+    """The conditions a value holds under, as the page states them."""
 
-    subject: str
-    subject_key: str | None = None
-    attribute: str
-    value_raw: str
-    unit: str | None = None
     period: str | None = None
     scope: str | None = None
     basis: str | None = None
     vintage: str | None = None
+
+
+class ExtractedFact(BaseModel):
+    """What the model returns per fact. Grounding fields are absent by design."""
+
+    subject: str
+    attribute: str
+    value_raw: str
+    unit: str | None = None
+    context: ExtractedContext = ExtractedContext()
     evidence_span: str
     confidence: float = 0.5
 
 
-PROMPT = """\
-You extract factual claims from a single page of a document.
+SYSTEM_PROMPT = """\
+You extract structured, grounded facts from ONE page of a document. The document may be
+a financial filing, an economic report, a corporate disclosure, or anything else — never
+assume a domain, a company, or a country. Work only from the page text you are given.
 
-Return a JSON array. Each element is one fact the page states explicitly.
+Return ONLY a JSON array of fact objects. No prose, no markdown, no code fences. If the
+page has no extractable facts, return [].
+
+Extract a fact only if it is EXPLICITLY stated on this page. Never infer from outside
+knowledge, never compute values that aren't printed, never carry context from a page you
+cannot see. If you are unsure whether something is on the page, do not emit it.
+
+Each fact object has exactly these fields:
+
+- "subject": the entity the fact is about, as named on the page (a company, country,
+  person, segment, etc.). Use the most specific named entity present. If the page refers
+  to "the Company" / "your Company" and the specific name is not on THIS page, keep it as
+  written — do not substitute a name from memory.
+- "attribute": a concise snake_case key for WHAT is measured, e.g. "revenue_from_operations",
+  "total_income", "real_gdp_growth", "cpi_inflation", "current_account_deficit",
+  "forex_reserves", "board_status", "shipment_volume". Normalize the wording to a stable
+  key. DO NOT put the period, scope, unit, or year inside the attribute.
+- "value_raw": the value exactly as printed — "81,415.38", "6.4 per cent", "USD 640.3
+  billion", "resigned", "740". Copy it verbatim.
+- "unit": the unit if indicated, using a stable token: "INR_million", "INR_crore",
+  "INR_lakh", "USD_billion", "percent", "count_million", etc. If no unit is indicated,
+  use null. NEVER guess a unit that isn't shown.
+- "context": an object with these keys, each null unless stated or unambiguous on the page:
+    - "period": the time the value refers to, as written — "FY24", "Q4 FY24", "H1 FY25",
+      "2024-25", "FY2024/25", "April–December 2024", "as of December 2024". null if none.
+    - "scope": "consolidated" or "standalone" if indicated, else null.
+    - "basis": a measurement-basis token if indicated — "real", "nominal",
+      "GDP_market_price", "GVA", "restated", else null.
+    - "vintage": "advance_estimate", "provisional", "revised", "final", or "projection"
+      if the page signals it (e.g. "estimated", "projected", "revised"), else null.
+- "evidence_span": the EXACT substring of the page text that contains this value. Copy it
+  character-for-character from the text provided — same digits, same punctuation, same
+  spacing. Keep it as short as possible while still containing the value and enough words
+  to identify what it is. This string MUST appear verbatim in the page text.
+- "confidence": a number 0.0–1.0 for how sure you are the fact is correctly read from the
+  page. Lower it for messy tables, ambiguous units, or unclear subjects.
 
 Rules:
-- Extract only what the page actually says. Never infer, calculate, convert,
-  scale or combine values. If the page does not state it, it is not a fact.
-- `value_raw` must be copied exactly as written, keeping digit separators,
-  decimals and symbols. Do not normalise or convert it.
-- `evidence_span` must be a VERBATIM substring of the PAGE TEXT below, copied
-  character for character. It must be long enough to contain the value and to
-  show what the value refers to. If you cannot copy an exact span from the page
-  text, omit the fact entirely.
-- `attribute` is a short snake_case name for what is being measured, chosen to
-  fit this page's content. It is free text, not a fixed list. Prefer a specific
-  name over a vague one.
-- `subject` is the entity the fact is about, named as the page names it.
-- `subject_key` is a strong, official identifier for that entity if the page
-  states one. Otherwise null.
-- `unit` is the unit exactly as written, if any. Otherwise null.
-- `period`, `scope`, `basis` and `vintage` record the conditions under which
-  the value holds, copied as the page expresses them. Use null where the page
-  is silent. Never guess these.
-    - `period`: the time the value covers.
-    - `scope`: the reporting boundary the value is drawn over.
-    - `basis`: which measure or definition the value uses.
-    - `vintage`: whether the figure is an estimate, provisional, revised, final
-      or a projection.
-- `confidence` is 0 to 1: how certain you are the page states this fact.
-- Do not report page numbers. Do not invent facts to fill the array.
-- If the page states no extractable facts, return an empty array.
+- Emit ONE object per distinct (subject, attribute, value, context). A table row that
+  reports the same metric across several columns (e.g. standalone/consolidated, or several
+  years) becomes SEVERAL facts — one per column — each tagged with the scope/period from
+  its column or row header.
+- If a value has no resolvable unit (a bare number), still extract it with "unit": null and
+  a lower confidence — do not drop it, and do not invent a unit.
+- Skip running headers, footers, page numbers, and narrative that states no concrete value.
+- NEVER output a value that is not present in the page text. NEVER output an evidence_span
+  that is not a verbatim substring of the page text.
+"""
 
-PAGE TEXT
----
+USER_TEMPLATE = '''Document: {doc_stem}   Page: {page_number}
+
+PAGE TEXT:
+"""
 {page_text}
----
-{tables_block}"""
+"""
 
-TABLES_TEMPLATE = """
-TABLES DETECTED ON THIS PAGE (layout aid only; `evidence_span` must still be
-copied from PAGE TEXT above, not from this block):
----
-{tables}
----"""
+Extract every stated fact from this page as a JSON array following the schema. Return only
+the JSON array.
+'''
 
 
 @dataclass
@@ -103,6 +127,8 @@ class ExtractionResult:
     facts: list[dict]
     attempts: int = 1
     error: str | None = None
+    # Facts the model proposed whose quote was not actually on the page.
+    unverbatim: int = 0
 
 
 def strip_code_fences(text: str) -> str:
@@ -199,16 +225,27 @@ def coerce_fact(raw: object) -> dict | None:
     except (TypeError, ValueError):
         confidence = 0.5
 
+    # The schema nests the context; a model that flattens it is still read.
+    nested = raw.get("context")
+    context_source = nested if isinstance(nested, dict) else raw
+
+    def context_field(name: str) -> str | None:
+        value = context_source.get(name)
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
     return {
         "subject": subject,
         "subject_key": text_field("subject_key"),
         "attribute": attribute,
         "value_raw": value_raw,
         "unit": text_field("unit"),
-        "period": text_field("period"),
-        "scope": text_field("scope"),
-        "basis": text_field("basis"),
-        "vintage": text_field("vintage"),
+        "period": context_field("period"),
+        "scope": context_field("scope"),
+        "basis": context_field("basis"),
+        "vintage": context_field("vintage"),
         "evidence_span": evidence_span,
         "confidence": min(max(confidence, 0.0), 1.0),
     }
@@ -247,17 +284,44 @@ def parse_fact_payload(text: str) -> list[dict]:
     return [fact for fact in (coerce_fact(item) for item in payload) if fact]
 
 
-def build_prompt(page_text: str, tables: list[list[list[str | None]]] | None = None) -> str:
-    """Assemble the page prompt, including tables only when there are some."""
-    tables_block = ""
-    if tables:
-        rendered = "\n\n".join(
-            "\n".join(" | ".join((cell or "").strip() for cell in row) for row in table)
-            for table in tables
-        )
-        tables_block = TABLES_TEMPLATE.format(tables=rendered)
+def build_prompt(page_text: str, doc_stem: str = "", page_number: int | str = "") -> str:
+    """The user message for one page."""
+    return USER_TEMPLATE.format(
+        doc_stem=doc_stem, page_number=page_number, page_text=page_text
+    )
 
-    return PROMPT.format(page_text=page_text, tables_block=tables_block)
+
+def is_verbatim(evidence_span: str, page_text: str, *, exact: bool = True) -> bool:
+    """Whether a quote really appears on the page.
+
+    A span the page does not contain cannot be evidence of anything, so a fact
+    carrying one is discarded rather than trusted. This is what holds the model
+    to the prompt's demand for a copied span.
+
+    ``exact`` requires a character-for-character substring. Relaxing it forgives
+    only whitespace: the words and digits must still all be present, in order,
+    on that page. That distinction matters because a PDF's line breaks fall in
+    places a model does not reliably reproduce, and a run of table figures is
+    the usual casualty.
+    """
+    if not evidence_span or not page_text:
+        return False
+    if evidence_span in page_text:
+        return True
+    if exact:
+        return False
+    return " ".join(evidence_span.split()) in " ".join(page_text.split())
+
+
+def drop_unverbatim(
+    facts: list[dict], page_text: str, *, exact: bool = True
+) -> tuple[list[dict], list[dict]]:
+    """Split proposed facts into those the page actually says, and those it does not."""
+    kept, rejected = [], []
+    for fact in facts:
+        target = kept if is_verbatim(fact["evidence_span"], page_text, exact=exact) else rejected
+        target.append(fact)
+    return kept, rejected
 
 
 def get_client(api_key: str | None = None):
@@ -287,6 +351,7 @@ def generate_text(
     *,
     model: str | None = None,
     response_schema=None,
+    system_instruction: str | None = None,
     max_attempts: int = MAX_ATTEMPTS,
     sleep=time.sleep,
 ) -> str:
@@ -300,6 +365,7 @@ def generate_text(
     config_kwargs = types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=response_schema if response_schema is not None else list[ExtractedFact],
+        system_instruction=system_instruction,
         temperature=0.0,
     )
 
@@ -327,24 +393,48 @@ def extract_page_facts(
     page_text: str,
     *,
     page_index: int = 0,
-    tables: list[list[list[str | None]]] | None = None,
+    doc_stem: str = "",
+    page_number: int | None = None,
     model: str | None = None,
+    exact_spans: bool | None = None,
     max_attempts: int = MAX_ATTEMPTS,
     sleep=time.sleep,
 ) -> ExtractionResult:
-    """Extract facts from one page, retrying once if the JSON comes back broken."""
+    """Extract facts from one page, retrying once if the JSON comes back broken.
+
+    A fact whose evidence span is not a verbatim substring of the page is
+    discarded here, before it can reach grounding. The prompt demands a
+    character-for-character quote; this is what holds the model to it.
+    """
     if not page_text or not page_text.strip():
         return ExtractionResult(page_index=page_index, facts=[])
 
-    prompt = build_prompt(page_text, tables)
+    if exact_spans is None:
+        exact_spans = config.REQUIRE_EXACT_SPANS
+
+    prompt = build_prompt(
+        page_text,
+        doc_stem=doc_stem,
+        page_number=page_number if page_number is not None else page_index + 1,
+    )
 
     for attempt in range(2):
         try:
             raw = generate_text(
-                client, prompt, model=model, max_attempts=max_attempts, sleep=sleep
+                client,
+                prompt,
+                model=model,
+                system_instruction=SYSTEM_PROMPT,
+                max_attempts=max_attempts,
+                sleep=sleep,
             )
+            proposed = parse_fact_payload(raw)
+            kept, rejected = drop_unverbatim(proposed, page_text, exact=exact_spans)
             return ExtractionResult(
-                page_index=page_index, facts=parse_fact_payload(raw), attempts=attempt + 1
+                page_index=page_index,
+                facts=kept,
+                attempts=attempt + 1,
+                unverbatim=len(rejected),
             )
         except FactJSONError as exc:
             if attempt == 0:

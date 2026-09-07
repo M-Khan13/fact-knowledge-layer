@@ -12,8 +12,11 @@ import pytest
 from google.genai import errors
 
 from backend.pipeline.extraction import (
+    SYSTEM_PROMPT,
     FactJSONError,
     build_prompt,
+    drop_unverbatim,
+    is_verbatim,
     coerce_fact,
     extract_json_array,
     extract_page_facts,
@@ -22,11 +25,14 @@ from backend.pipeline.extraction import (
     strip_code_fences,
 )
 
+PAGE_TEXT = "Subject A reported some measure of 12.3 units.\nAnother line follows."
+
 WELL_FORMED = [
     {
         "subject": "Subject A",
         "attribute": "some_measure",
         "value_raw": "12.3",
+        "context": {"period": "FY24", "scope": None, "basis": None, "vintage": None},
         "evidence_span": "Subject A reported some measure of 12.3 units.",
         "confidence": 0.8,
     }
@@ -122,7 +128,8 @@ def test_coerce_normalises_numbers_and_clamps_confidence():
 
 
 def test_context_fields_default_to_none_rather_than_being_guessed():
-    coerced = coerce_fact(dict(WELL_FORMED[0]))
+    bare = {k: v for k, v in WELL_FORMED[0].items() if k != "context"}
+    coerced = coerce_fact(bare)
 
     assert coerced["period"] is None
     assert coerced["scope"] is None
@@ -131,13 +138,72 @@ def test_context_fields_default_to_none_rather_than_being_guessed():
     assert coerced["subject_key"] is None
 
 
-def test_prompt_includes_tables_only_when_present():
-    plain = build_prompt("page text")
-    with_tables = build_prompt("page text", [[["h1", "h2"], ["a", None]]])
+def test_the_prompt_carries_the_page_and_its_identity():
+    prompt = build_prompt("some page text", doc_stem="a-report", page_number=7)
 
-    assert "TABLES DETECTED" not in plain
-    assert "TABLES DETECTED" in with_tables
-    assert "h1 | h2" in with_tables
+    assert "some page text" in prompt
+    assert "a-report" in prompt
+    assert "Page: 7" in prompt
+
+
+def test_the_system_prompt_names_no_domain_company_or_country():
+    """The graders use unseen PDFs, so the instructions must stay general."""
+    lowered = SYSTEM_PROMPT.lower()
+
+    for term in ("delhivery", "india", "rupee", "rbi", "imf", "economic survey"):
+        assert term not in lowered
+
+
+def test_a_quote_the_page_does_not_contain_is_not_verbatim():
+    assert is_verbatim("of 12.3 units", PAGE_TEXT)
+    assert not is_verbatim("of 12.4 units", PAGE_TEXT)
+    assert not is_verbatim("", PAGE_TEXT)
+    assert not is_verbatim("anything", "")
+
+
+def test_collapsed_whitespace_is_not_a_verbatim_span():
+    """The page's own line breaks are part of the text being quoted."""
+    assert not is_verbatim("12.3 units. Another line", PAGE_TEXT)
+    assert is_verbatim("12.3 units.\nAnother line", PAGE_TEXT)
+
+
+def test_unverbatim_facts_are_separated_from_the_rest():
+    facts = [
+        {"evidence_span": "reported some measure"},
+        {"evidence_span": "a span the page never had"},
+    ]
+
+    kept, rejected = drop_unverbatim(facts, PAGE_TEXT)
+
+    assert len(kept) == 1 and len(rejected) == 1
+
+
+def test_extraction_drops_facts_whose_quote_is_not_on_the_page():
+    invented = [
+        dict(WELL_FORMED[0]),
+        {**WELL_FORMED[0], "evidence_span": "a span the page never had"},
+    ]
+    client = StubClient([json.dumps(invented)])
+
+    result = extract_page_facts(client, PAGE_TEXT, sleep=lambda _s: None)
+
+    assert len(result.facts) == 1
+    assert result.unverbatim == 1
+
+
+def test_nested_context_is_read():
+    coerced = coerce_fact(dict(WELL_FORMED[0]))
+
+    assert coerced["period"] == "FY24"
+    assert coerced["scope"] is None
+
+
+def test_a_flattened_context_is_still_read():
+    """Tolerated, because a model that ignores the nesting is still usable."""
+    flat = {k: v for k, v in WELL_FORMED[0].items() if k != "context"}
+    flat["period"] = "FY24"
+
+    assert coerce_fact(flat)["period"] == "FY24"
 
 
 def test_generate_retries_rate_limits_then_succeeds():
@@ -179,7 +245,7 @@ def test_generate_gives_up_after_max_attempts():
 def test_extraction_retries_once_on_unparseable_json():
     client = StubClient(["not json at all", json.dumps(WELL_FORMED)])
 
-    result = extract_page_facts(client, "page text", sleep=lambda _s: None)
+    result = extract_page_facts(client, PAGE_TEXT, sleep=lambda _s: None)
 
     assert len(result.facts) == 1
     assert result.attempts == 2
@@ -189,7 +255,7 @@ def test_extraction_retries_once_on_unparseable_json():
 def test_extraction_reports_failure_rather_than_inventing_facts():
     client = StubClient(["still not json", "nope"])
 
-    result = extract_page_facts(client, "page text", sleep=lambda _s: None)
+    result = extract_page_facts(client, PAGE_TEXT, sleep=lambda _s: None)
 
     assert result.facts == []
     assert result.error is not None
@@ -202,3 +268,14 @@ def test_blank_page_is_not_sent_to_the_model():
 
     assert result.facts == []
     assert client.calls == 0
+
+
+def test_relaxed_matching_forgives_whitespace_but_nothing_else():
+    """A PDF's line breaks are not something a model reproduces reliably."""
+    span = "12.3 units. Another line"
+
+    assert not is_verbatim(span, PAGE_TEXT)
+    assert is_verbatim(span, PAGE_TEXT, exact=False)
+    # Relaxing whitespace must not let a fabricated span through.
+    assert not is_verbatim("12.4 units. Another line", PAGE_TEXT, exact=False)
+    assert not is_verbatim("a span the page never had", PAGE_TEXT, exact=False)

@@ -33,6 +33,15 @@ UPLOAD_DIR = _path_setting("UPLOAD_DIR", "data/uploads")
 INPUT_DIR = _path_setting("INPUT_DIR", "data/input")
 
 
+# Whether an evidence span must match the page character for character. A PDF's
+# line breaks fall where a model does not reliably reproduce them, so the
+# relaxed setting forgives whitespace only - every word and digit must still be
+# present, in order, on that page.
+REQUIRE_EXACT_SPANS = os.getenv("REQUIRE_EXACT_SPANS", "true").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+
+
 def has_gemini_key() -> bool:
     """True when an API key is configured. Never exposes the key itself."""
     return bool(GEMINI_API_KEY.strip())

@@ -74,9 +74,14 @@ class Label:
     scope: str | None = None
     basis: str | None = None
     vintage: str | None = None
-    page: int | None = None
+    pages: list[int] = field(default_factory=list)
     label_id: str | None = None
     raw: dict = field(default_factory=dict)
+
+    @property
+    def page(self) -> int | None:
+        """The first cited page, where one is given."""
+        return self.pages[0] if self.pages else None
 
     @property
     def describe(self) -> str:
@@ -139,6 +144,33 @@ def _as_text(value: object) -> str | None:
         return repr(value) if isinstance(value, float) else str(value)
     text = str(value).strip()
     return text or None
+
+
+def _read_pages(value: object) -> list[int]:
+    """Read a page citation, which may name more than one page.
+
+    A fact often appears on several pages of the same document, so a label may
+    cite `22`, `[6, 9, 17]` or `"6, 9, 17"`. Any of them is enough for the
+    grounded page to be considered agreed.
+    """
+    if value is None:
+        return []
+
+    candidates: list[object]
+    if isinstance(value, (list, tuple)):
+        candidates = list(value)
+    elif isinstance(value, str):
+        candidates = [part for part in value.replace(";", ",").split(",")]
+    else:
+        candidates = [value]
+
+    pages = []
+    for candidate in candidates:
+        try:
+            pages.append(int(str(candidate).strip()))
+        except (TypeError, ValueError):
+            continue
+    return pages
 
 
 def _find_entries(payload: object) -> tuple[list[dict], str, str | None]:
@@ -221,11 +253,7 @@ def load_labels(path: str | Path) -> LoadedLabels:
         if group_key and not values.get("document"):
             values["document"] = entry.get(group_key)
 
-        page = values.get("page")
-        try:
-            page_number = int(page) if page is not None else None
-        except (TypeError, ValueError):
-            page_number = None
+        pages = _read_pages(values.get("page"))
 
         labels.append(
             Label(
@@ -238,7 +266,7 @@ def load_labels(path: str | Path) -> LoadedLabels:
                 scope=_as_text(values.get("scope")),
                 basis=_as_text(values.get("basis")),
                 vintage=_as_text(values.get("vintage")),
-                page=page_number,
+                pages=pages,
                 label_id=_as_text(values.get("label_id")),
                 raw=entry,
             )
@@ -479,7 +507,7 @@ def evaluate(
                 label=label,
                 fact=fact,
                 attribute_similarity=similarity,
-                page_agrees=label.page is None or label.page == fact.page,
+                page_agrees=not label.pages or fact.page in label.pages,
             )
         )
 
@@ -559,7 +587,8 @@ def format_report(result: EvalResult, *, show: int = 30) -> str:
         lines += ["", f"  page disagreements  {len(result.page_disagreements)}"]
         for match in result.page_disagreements[:show]:
             lines.append(
-                f"    {match.label.describe}: labelled p{match.label.page}, "
+                f"    {match.label.describe}: labelled p"
+                f"{'/'.join(str(p) for p in match.label.pages)}, "
                 f"grounded p{match.fact.page}"
             )
 
@@ -628,6 +657,7 @@ def result_to_dict(result: EvalResult) -> dict:
                 "value": miss.label.value,
                 "unit": miss.label.unit,
                 "period": miss.label.period,
+                "pages": miss.label.pages,
                 "label_id": miss.label.label_id,
                 "note": miss.note,
                 "nearest_fact_id": miss.nearest.fact_id if miss.nearest else None,
@@ -648,7 +678,7 @@ def result_to_dict(result: EvalResult) -> dict:
         ],
         "page_disagreements": [
             {
-                "label_page": match.label.page,
+                "label_pages": match.label.pages,
                 "grounded_page": match.fact.page,
                 "fact_id": match.fact.fact_id,
                 "attribute": match.label.attribute,

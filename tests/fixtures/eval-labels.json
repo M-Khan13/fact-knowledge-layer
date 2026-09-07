@@ -1,0 +1,239 @@
+{
+  "_source": [
+    "Transcribed from the 'A. Facts to verify' tables in tests/fixtures/",
+    "02-eval-delhivery.md and 03-eval-india-macro.md. Nothing is added that is",
+    "not in those tables. Section B and C of those files describe expected",
+    "verdicts and are not facts, so they are not labelled here.",
+    "Page numbers are copied as written: the eval docs state they are PDF page",
+    "indices within the excerpt, not printed page numbers."
+  ],
+  "labels": [
+    {
+      "id": "delhivery-1",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "revenue from operations",
+      "value": "81,415.38",
+      "unit": "₹ mn",
+      "source_doc": "02-delhivery-annual-report-fy24-excerpt",
+      "page": 22,
+      "period": "FY24",
+      "scope": "consolidated"
+    },
+    {
+      "id": "delhivery-2",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "revenue from operations",
+      "value": "74,540.82",
+      "unit": "₹ mn",
+      "source_doc": "02-delhivery-annual-report-fy24-excerpt",
+      "page": 22,
+      "period": "FY24",
+      "scope": "standalone"
+    },
+    {
+      "id": "delhivery-3",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "revenue from operations",
+      "value": "72,253.01",
+      "unit": "₹ mn",
+      "source_doc": "02-delhivery-annual-report-fy24-excerpt",
+      "page": 22,
+      "period": "FY23",
+      "scope": "consolidated"
+    },
+    {
+      "id": "delhivery-4",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "revenue from services",
+      "value": "8,142",
+      "unit": "₹ Cr",
+      "source_doc": "03-delhivery-q4-fy24-earnings-presentation",
+      "page": [6, 9, 17],
+      "period": "FY24",
+      "scope": "consolidated"
+    },
+    {
+      "id": "delhivery-5",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "revenue from services",
+      "value": "2,076",
+      "unit": "₹ Cr",
+      "source_doc": "03-delhivery-q4-fy24-earnings-presentation",
+      "page": 17,
+      "period": "Q4 FY24"
+    },
+    {
+      "id": "delhivery-6",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "total income",
+      "value": "8,594",
+      "unit": "₹ Cr",
+      "source_doc": "03-delhivery-q4-fy24-earnings-presentation",
+      "page": 17,
+      "period": "FY24"
+    },
+    {
+      "id": "delhivery-7",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "total income",
+      "value": "49,114.06",
+      "unit": "₹ mn",
+      "source_doc": "01-delhivery-prospectus-2022-excerpt",
+      "page": [5, 17],
+      "period": "FY21",
+      "vintage": "restated"
+    },
+    {
+      "id": "delhivery-8",
+      "collection": "delhivery",
+      "subject": "Delhivery",
+      "attribute": "Express Parcel shipments",
+      "value": "740",
+      "unit": "Mn",
+      "source_doc": "03-delhivery-q4-fy24-earnings-presentation",
+      "page": 9,
+      "period": "FY24"
+    },
+    {
+      "id": "delhivery-9",
+      "collection": "delhivery",
+      "subject": "Suvir Suren Sujan",
+      "attribute": "board status",
+      "value": "Non-Exec Nominee Director, since 7 Mar 2019",
+      "unit": null,
+      "source_doc": "01-delhivery-prospectus-2022-excerpt",
+      "page": [30, 85],
+      "period": "as of 2022"
+    },
+    {
+      "id": "delhivery-10",
+      "collection": "delhivery",
+      "subject": "Suvir Suren Sujan",
+      "attribute": "board status",
+      "value": "resigned w.e.f. 24 Aug 2023",
+      "unit": null,
+      "source_doc": "02-delhivery-annual-report-fy24-excerpt",
+      "page": [33, 91],
+      "period": "FY24"
+    },
+    {
+      "id": "delhivery-11",
+      "collection": "delhivery",
+      "subject": "Sahil Barua",
+      "attribute": "role",
+      "value": "Managing Director & CEO",
+      "unit": null,
+      "source_doc": "02-delhivery-annual-report-fy24-excerpt",
+      "page": 24,
+      "period": "FY24"
+    },
+    {
+      "id": "macro-1",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "real GDP growth",
+      "value": "6.4",
+      "unit": "%",
+      "source_doc": "01-india-economic-survey-2024-25-excerpt",
+      "page": [4, 14],
+      "period": "FY25",
+      "vintage": "advance estimate"
+    },
+    {
+      "id": "macro-2",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "real GDP growth",
+      "value": "6.5",
+      "unit": "%",
+      "source_doc": "03-imf-india-2025-article-iv-excerpt",
+      "page": [3, 5, 10],
+      "period": "FY2024/25",
+      "basis": "at market prices"
+    },
+    {
+      "id": "macro-3",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "real GDP growth",
+      "value": "6.5",
+      "unit": "%",
+      "source_doc": "02-rbi-annual-report-2024-25-excerpt",
+      "page": 24,
+      "period": "Q1 2024-25"
+    },
+    {
+      "id": "macro-4",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "real GDP growth",
+      "value": "6.0",
+      "unit": "%",
+      "source_doc": "01-india-economic-survey-2024-25-excerpt",
+      "page": 20,
+      "period": "H1 FY25"
+    },
+    {
+      "id": "macro-5",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "CPI headline inflation",
+      "value": "5.4",
+      "unit": "%",
+      "source_doc": "01-india-economic-survey-2024-25-excerpt",
+      "page": 28,
+      "period": "FY24"
+    },
+    {
+      "id": "macro-6",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "CPI headline inflation",
+      "value": "4.9",
+      "unit": "%",
+      "source_doc": "01-india-economic-survey-2024-25-excerpt",
+      "page": 28,
+      "period": "Apr–Dec 2024"
+    },
+    {
+      "id": "macro-7",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "current account deficit",
+      "value": "0.6",
+      "unit": "% of GDP",
+      "source_doc": "03-imf-india-2025-article-iv-excerpt",
+      "page": 12,
+      "period": "FY2024/25"
+    },
+    {
+      "id": "macro-8",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "current account deficit",
+      "value": "0.7",
+      "unit": "% of GDP",
+      "source_doc": "03-imf-india-2025-article-iv-excerpt",
+      "page": 12,
+      "period": "FY2023/24"
+    },
+    {
+      "id": "macro-9",
+      "collection": "india-macroeconomy",
+      "subject": "India",
+      "attribute": "forex reserves",
+      "value": "640.3",
+      "unit": "USD bn",
+      "source_doc": "01-india-economic-survey-2024-25-excerpt",
+      "page": 37,
+      "period": "end-Dec 2024"
+    }
+  ]
+}

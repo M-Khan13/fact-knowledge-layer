@@ -31,7 +31,8 @@ def find_documents(labels, input_dir: Path) -> tuple[list[Path], list[str]]:
     Names are matched on filename stem, so a label may name the file with or
     without its extension.
     """
-    available = {path.stem.lower(): path for path in sorted(input_dir.glob("*.pdf"))}
+    # Searched recursively, so one run can cover datasets kept in subfolders.
+    available = {path.stem.lower(): path for path in sorted(input_dir.rglob("*.pdf"))}
     wanted = sorted({label.document for label in labels if label.document})
 
     if not wanted:
