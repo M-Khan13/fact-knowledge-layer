@@ -18,6 +18,7 @@ from pathlib import Path
 from backend import store
 from backend.pipeline.extraction import extract_page_facts
 from backend.pipeline.grounding import DEFAULT_MIN_SCORE, ground
+from backend.pipeline.normalization import normalize_facts
 from backend.pipeline.parsing import ParsedDoc, parse_pdf
 from backend.pipeline.schema import Context, Fact, make_doc_id, make_fact_id
 
@@ -35,6 +36,7 @@ class IngestReport:
     grounded: int = 0
     dropped_ungrounded: int = 0
     duplicates: int = 0
+    unresolved_units: int = 0
     failed_pages: list[int] = field(default_factory=list)
     facts: list[Fact] = field(default_factory=list)
     skipped: bool = False
@@ -49,7 +51,8 @@ class IngestReport:
         return (
             f"{self.source_doc}: {self.grounded} facts from {self.pages_processed} pages "
             f"({self.proposed} proposed, {self.dropped_ungrounded} dropped as ungrounded, "
-            f"{self.duplicates} duplicate, {len(self.failed_pages)} pages failed)"
+            f"{self.duplicates} duplicate, {len(self.failed_pages)} pages failed, "
+            f"{self.unresolved_units} without a resolved unit)"
         )
 
 
@@ -209,7 +212,14 @@ def ingest_pdf(
             if on_page is not None:
                 on_page(page, result, report)
 
+        # Normalize as a batch: self-references resolve against the whole
+        # document, which needs every fact from it in hand.
+        normalize_facts(report.facts)
+
         report.grounded = len(report.facts)
+        report.unresolved_units = sum(
+            1 for fact in report.facts if not fact.has_resolved_unit
+        )
         store.save_facts(conn, report.facts)
 
     return report

@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from backend import config
-from backend.pipeline.schema import Context, Fact
+from backend.pipeline.schema import Context, ContextSignature, Fact
+from backend.pipeline.temporal import Period
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS collections (
@@ -58,14 +59,51 @@ CREATE TABLE IF NOT EXISTS facts (
     grounding_method TEXT,
     grounding_score  REAL,
     confidence       REAL NOT NULL,
-    created_at       TEXT NOT NULL
+    created_at       TEXT NOT NULL,
+    -- Populated by normalization.
+    unit_raw         TEXT,
+    unit_canonical   TEXT,
+    unit_family      TEXT,
+    sig_period_type  TEXT,
+    sig_fiscal_year  INTEGER,
+    sig_sub_period   TEXT,
+    sig_period_raw   TEXT,
+    sig_scope        TEXT,
+    sig_basis        TEXT,
+    sig_vintage      TEXT,
+    normalized       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_facts_collection ON facts(collection_id);
 CREATE INDEX IF NOT EXISTS idx_facts_subject    ON facts(collection_id, subject_key);
 CREATE INDEX IF NOT EXISTS idx_facts_attribute  ON facts(collection_id, attribute);
 CREATE INDEX IF NOT EXISTS idx_facts_doc        ON facts(doc_id);
+CREATE INDEX IF NOT EXISTS idx_facts_signature  ON facts(collection_id, subject_key, attribute);
 """
+
+# Columns added after the first version of the table shipped. A database made
+# by an earlier run is upgraded in place rather than being thrown away.
+ADDED_COLUMNS: dict[str, str] = {
+    "unit_raw": "TEXT",
+    "unit_canonical": "TEXT",
+    "unit_family": "TEXT",
+    "sig_period_type": "TEXT",
+    "sig_fiscal_year": "INTEGER",
+    "sig_sub_period": "TEXT",
+    "sig_period_raw": "TEXT",
+    "sig_scope": "TEXT",
+    "sig_basis": "TEXT",
+    "sig_vintage": "TEXT",
+    "normalized": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add any columns a database made by an older version is missing."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+    for column, declaration in ADDED_COLUMNS.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE facts ADD COLUMN {column} {declaration}")
 
 
 def _now() -> str:
@@ -81,6 +119,7 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -162,8 +201,19 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             fact.grounding_score,
             fact.confidence,
             _now(),
+            fact.unit_raw,
+            fact.unit_canonical,
+            fact.unit_family,
+            sig.period.period_type if sig else None,
+            sig.period.fiscal_year if sig else None,
+            sig.period.sub_period if sig else None,
+            sig.period.raw if sig else None,
+            sig.scope if sig else None,
+            sig.basis if sig else None,
+            sig.vintage if sig else None,
+            1 if fact.normalized else 0,
         )
-        for fact in facts
+        for fact, sig in ((f, f.signature) for f in facts)
     ]
     if not rows:
         return 0
@@ -175,8 +225,10 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             value_raw, value_num, unit, context_period, context_scope,
             context_basis, context_vintage, source_doc, page, page_label,
             evidence_span, rects, grounding_method, grounding_score,
-            confidence, created_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            confidence, created_at, unit_raw, unit_canonical, unit_family,
+            sig_period_type, sig_fiscal_year, sig_sub_period, sig_period_raw,
+            sig_scope, sig_basis, sig_vintage, normalized
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(fact_id) DO UPDATE SET
             value_num       = excluded.value_num,
             unit            = excluded.unit,
@@ -189,7 +241,18 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             rects           = excluded.rects,
             grounding_method= excluded.grounding_method,
             grounding_score = excluded.grounding_score,
-            confidence      = excluded.confidence
+            confidence      = excluded.confidence,
+            unit_raw        = excluded.unit_raw,
+            unit_canonical  = excluded.unit_canonical,
+            unit_family     = excluded.unit_family,
+            sig_period_type = excluded.sig_period_type,
+            sig_fiscal_year = excluded.sig_fiscal_year,
+            sig_sub_period  = excluded.sig_sub_period,
+            sig_period_raw  = excluded.sig_period_raw,
+            sig_scope       = excluded.sig_scope,
+            sig_basis       = excluded.sig_basis,
+            sig_vintage     = excluded.sig_vintage,
+            normalized      = excluded.normalized
         """,
         rows,
     )
@@ -221,6 +284,23 @@ def _row_to_fact(row: sqlite3.Row) -> Fact:
         rects=[tuple(r) for r in json.loads(row["rects"] or "[]")],
         grounding_method=row["grounding_method"],
         grounding_score=row["grounding_score"],
+        unit_raw=row["unit_raw"],
+        unit_canonical=row["unit_canonical"],
+        unit_family=row["unit_family"],
+        normalized=bool(row["normalized"]),
+        signature=ContextSignature(
+            period=Period(
+                period_type=row["sig_period_type"],
+                fiscal_year=row["sig_fiscal_year"],
+                sub_period=row["sig_sub_period"],
+                raw=row["sig_period_raw"],
+            ),
+            scope=row["sig_scope"],
+            basis=row["sig_basis"],
+            vintage=row["sig_vintage"],
+        )
+        if row["normalized"]
+        else None,
     )
 
 

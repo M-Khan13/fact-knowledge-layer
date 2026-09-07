@@ -98,3 +98,63 @@ def test_results_are_ordered_by_document_position(db, fixture_path, parsed_doc):
     pages = [fact.page for fact in store.list_facts(db, "sample")]
 
     assert pages == sorted(pages)
+
+
+def test_normalized_fields_round_trip(db, fixture_path, parsed_doc):
+    """The context signature must survive a trip through SQLite intact."""
+    from backend.pipeline.normalization import normalize_fact
+
+    report = ingest(db, fixture_path, parsed_doc)
+    fact = report.facts[0]
+    fact.unit = "₹ Cr"
+    fact.value_raw = "8,142"
+    fact.context.period = "FY 2023-24"
+    fact.context.scope = "Consolidated"
+    fact.context.vintage = "Audited"
+    normalize_fact(fact)
+    store.save_facts(db, [fact])
+
+    reloaded = store.get_fact(db, fact.fact_id)
+
+    assert reloaded.value_num == fact.value_num
+    assert reloaded.unit_canonical == "INR"
+    assert reloaded.unit_raw == "₹ Cr"
+    assert reloaded.unit_family == "currency"
+    assert reloaded.normalized is True
+    assert reloaded.signature.period.fiscal_year == 2024
+    assert reloaded.signature.period.period_type == "FY"
+    assert reloaded.signature.scope == "consolidated"
+    assert reloaded.signature.vintage == "final"
+    assert reloaded.signature.key() == fact.signature.key()
+
+
+def test_a_database_from_an_earlier_version_is_upgraded(tmp_path):
+    """Opening an older database adds the new columns instead of failing."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """
+        CREATE TABLE collections (collection_id TEXT PRIMARY KEY, name TEXT, created_at TEXT);
+        CREATE TABLE documents (doc_id TEXT PRIMARY KEY, collection_id TEXT, source_doc TEXT,
+            filename TEXT, sha256 TEXT, page_count INTEGER, created_at TEXT);
+        CREATE TABLE facts (
+            fact_id TEXT PRIMARY KEY, collection_id TEXT, doc_id TEXT, subject TEXT,
+            subject_key TEXT, attribute TEXT, value_raw TEXT, value_num REAL, unit TEXT,
+            context_period TEXT, context_scope TEXT, context_basis TEXT,
+            context_vintage TEXT, source_doc TEXT, page INTEGER, page_label TEXT,
+            evidence_span TEXT, rects TEXT, grounding_method TEXT, grounding_score REAL,
+            confidence REAL, created_at TEXT);
+        """
+    )
+    old.commit()
+    old.close()
+
+    conn = store.connect(path)
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+        assert {"unit_canonical", "sig_fiscal_year", "normalized"} <= columns
+        assert store.list_facts(conn, "anything") == []
+    finally:
+        conn.close()

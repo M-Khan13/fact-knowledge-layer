@@ -8,9 +8,8 @@ any claim the system makes can be checked against the source document.
 
 ## Status
 
-Phase 2 — PDFs parse, facts are extracted into the fact schema, grounded
-against the document, and stored. Normalization, matching and reconciliation
-land in later phases.
+Phase 3 — PDFs parse, facts are extracted, grounded, normalized into a context
+signature, and stored. Matching and reconciliation land in later phases.
 
 ## Layout
 
@@ -63,6 +62,48 @@ as failed. Rate limits and transient server errors back off and retry. One bad
 page never costs the rest of the document.
 
 `value_num` and the canonical unit stay empty here; normalization fills them.
+
+## Normalization
+
+A fact is a value plus the conditions under which that value holds. Those
+conditions — the **context signature** — are what comparison gates on, before
+anything is decided about the numbers. Most false contradictions come from
+comparing two figures that were never describing the same thing.
+
+**Units.** Every value is stored in one base alongside the unit it was written
+in, so `8,142 ₹ Cr` and `81,415.38 ₹ million` become the same number and agree
+to within 0.006%. Unit-blind comparison is banned: a value whose unit cannot be
+resolved gets no unit rather than a guessed one, has its confidence capped, and
+can never be auto-contradicted. Units carry a *family*, and families never
+cross-compare, so a percentage cannot contradict a headcount and rupees cannot
+contradict dollars (no exchange rate is invented). A unit this code has never
+seen becomes a canonical token of its own, so an unfamiliar document still
+compares correctly with itself.
+
+**Periods.** An Indian fiscal year runs April–March and is named for the year
+it ends in. `FY2024/25`, `2024-25` and `FY25` therefore resolve to one token,
+which is what lets different publishers line up at all. `year ended March 31,
+2024` resolves to FY24 and `quarter ended December 31, 2023` to Q3 FY24.
+Periods also nest: Q4 FY24 sits inside FY24, so a difference across that
+boundary is a part against a whole, not a disagreement.
+
+**Scope, basis, vintage.** Scope resolves to consolidated or standalone. Basis
+stays free text, canonicalised but never constrained to a list. Vintage records
+how settled a figure is, ordered `advance_estimate < provisional < revised <
+final`, so a changed number across vintages is a revision rather than a
+conflict. Projections sit outside that order.
+
+**Entities.** Where a document states an official identifier — a DIN for a
+person, a CIN for a company — that decides identity, since it survives spelling
+differences a name does not. Both are matched by their published shape, not
+against any list of known entities. Otherwise the normalized legal name is
+used, with legal suffixes and honorifics dropped. A document's oblique
+self-references ("the Company", "your Company") bind to whichever entity that
+document actually names, worked out at runtime from its own facts.
+
+**Agreement.** Two same-context values agree within the larger of ±0.5%
+relative or one unit in the last reported decimal; percentage-style values use
+a flat ±0.1 point band instead.
 
 ## Ingesting documents
 
