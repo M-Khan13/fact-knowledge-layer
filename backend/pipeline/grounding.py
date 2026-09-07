@@ -18,6 +18,7 @@ Three strategies run in order of trustworthiness:
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from io import BytesIO
@@ -222,19 +223,35 @@ def _try_fuzzy(
 
 
 def ground(
-    quote: str, doc: ParsedDoc, *, min_score: float = DEFAULT_MIN_SCORE
+    quote: str,
+    doc: ParsedDoc,
+    *,
+    min_score: float = DEFAULT_MIN_SCORE,
+    page_indices: Iterable[int] | None = None,
 ) -> Grounding | None:
     """Locate ``quote`` in ``doc``, or return None if it is not really there.
 
     Returns the single best location across all pages: a more trustworthy
     strategy always beats a less trustworthy one, then a higher similarity
     score, then the earlier page.
+
+    ``page_indices`` narrows the search. A quote lifted from a known page should
+    be confirmed on that page first: it is faster, and it cannot be lured onto a
+    different page that happens to repeat the same sentence.
     """
     if not quote or not quote.strip():
         return None
 
+    if page_indices is None:
+        pages = doc.pages
+    else:
+        wanted = set(page_indices)
+        pages = [page for page in doc.pages if page.index in wanted]
+    if not pages:
+        return None
+
     candidates: list[Grounding] = []
-    for page in doc.pages:
+    for page in pages:
         # Evaluated lazily: the normalized pass only runs where search_for missed.
         for method, attempt in (
             ("search_for", lambda p=page: _try_search_for(p, doc.handle, quote)),
@@ -260,7 +277,7 @@ def ground(
 
     # Fuzzy matching is expensive, so it only runs when nothing exact was found.
     if not candidates:
-        for page in doc.pages:
+        for page in pages:
             result = _try_fuzzy(page, quote, min_score)
             if result is None:
                 continue
