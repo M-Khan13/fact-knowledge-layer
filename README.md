@@ -8,8 +8,9 @@ any claim the system makes can be checked against the source document.
 
 ## Status
 
-Phase 3 — PDFs parse, facts are extracted, grounded, normalized into a context
-signature, and stored. Matching and reconciliation land in later phases.
+Phase 4 — PDFs parse, facts are extracted, grounded, normalized into a context
+signature, stored, and matched into candidate pairs across documents.
+Reconciliation lands in the next phase.
 
 ## Layout
 
@@ -104,6 +105,41 @@ document actually names, worked out at runtime from its own facts.
 **Agreement.** Two same-context values agree within the larger of ±0.5%
 relative or one unit in the last reported decimal; percentage-style values use
 a flat ±0.1 point band instead.
+
+## Matching
+
+Matching proposes candidate pairs; it does not judge them. The only question is
+whether two facts are about the same subject and the same attribute — the
+verdict comes later, from the context signature.
+
+Pairs are always drawn **across different documents**. A document restating
+itself is not cross-document agreement, and counting it would inflate
+everything downstream.
+
+Subjects are blocked on their resolved key. A stated DIN or CIN is
+authoritative and must match exactly — two different DINs are two different
+people however alike the names look. Only weaker name-based keys may merge on
+similarity, which is where spelling variation actually occurs. Similarity is
+scored per pair, so a block widened to catch a variant spelling does not
+downgrade the pairs inside it that agree exactly.
+
+Attributes are free text, so two documents rarely name a measure identically.
+An exact match scores 1.0; otherwise similarity is measured by embedding. The
+threshold is set low enough to admit pairs differing only in a qualifier —
+"real GDP growth" against "nominal GDP growth" is one measure taken two ways,
+and it is the `basis` field, not the threshold, that separates them afterwards.
+
+Embeddings come from Gemini when a key is configured, and otherwise from a
+deterministic local embedder using feature hashing, so matching still works and
+stays reproducible offline. Vectors are cached by content in the database. The
+local fallback is lexical rather than semantic — it relates "forex reserves" to
+"foreign exchange reserves" but misses "CPI inflation" against "consumer price
+inflation" — so **the thresholds are calibrated for it and should be re-tuned
+against real embeddings**. Every threshold is a parameter for that reason.
+
+Matching is incremental: passing the new document's fact ids restricts results
+to pairs involving them, so adding a document never re-examines the pairs a
+collection already had.
 
 ## Ingesting documents
 
