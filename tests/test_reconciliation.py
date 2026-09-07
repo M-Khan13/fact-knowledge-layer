@@ -28,6 +28,7 @@ from backend.pipeline.reconciliation import (
     REASON_SAME_VALUE,
     REASON_SCOPE_DIFF,
     REASON_UNIT_DIFF_RESOLVED,
+    REASON_UNIT_INCOMPARABLE,
     REASON_UNIT_MISSING,
     REASON_VALUE_CONFLICT,
     REASON_VINTAGE_REVISION,
@@ -92,17 +93,31 @@ def test_an_unresolved_unit_never_contradicts():
     assert result.reason_code == REASON_UNIT_MISSING
 
 
-def test_different_unit_families_cannot_be_compared():
+def test_different_unit_families_are_incomparable_not_missing():
+    """Both units are stated perfectly well; they just do not convert."""
     result = verdict_for(fact("6.5", unit="%"), fact("8142", doc="doc_b"))
 
     assert result.verdict == VERDICT_NO_VERDICT
-    assert result.reason_code == REASON_UNIT_MISSING
+    assert result.reason_code == REASON_UNIT_INCOMPARABLE
 
 
 def test_two_currencies_are_not_converted_into_each_other():
     result = verdict_for(fact("100", unit="₹ bn"), fact("100", unit="US$ bn", doc="doc_b"))
 
     assert result.verdict == VERDICT_NO_VERDICT
+    assert result.reason_code == REASON_UNIT_INCOMPARABLE
+
+
+def test_a_missing_unit_is_reported_separately_from_an_incomparable_one():
+    """The two call for different fixes, so they carry different codes."""
+    missing = verdict_for(fact("740", unit=None), fact("8142", doc="doc_b"))
+    incomparable = verdict_for(fact("6.5", unit="%"), fact("8142", doc="doc_b"))
+
+    assert missing.reason_code == REASON_UNIT_MISSING
+    assert incomparable.reason_code == REASON_UNIT_INCOMPARABLE
+    assert missing.reason_text != incomparable.reason_text
+    assert "no unit" in missing.reason_text
+    assert "different units" in incomparable.reason_text
 
 
 def test_the_unit_gate_wins_even_when_the_context_also_differs():

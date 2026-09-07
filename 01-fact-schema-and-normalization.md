@@ -111,12 +111,39 @@ around LLM behaviour" mindset Superjoin says they hire for.
 {
   fact_a, fact_b,
   verdict: corroborate | contradict | reconcilable | no-verdict,
-  reason_code: same_value | value_conflict | period_subset | scope_diff |
-               basis_diff | unit_diff_resolved | vintage_revision | unit_missing,
+  reason_code: same_value | value_conflict | period_subset | period_diff |
+               scope_diff | basis_diff | unit_diff_resolved | vintage_revision |
+               unit_missing | unit_incomparable,
   reason_text: "<one human line the LLM writes>",
   confidence
 }
 ```
+
+Reason codes in full:
+
+| Code | Verdict | Meaning |
+|---|---|---|
+| `same_value` | corroborate | same context, values agree within the band |
+| `unit_diff_resolved` | corroborate | agree once both units resolve to one base (₹ Cr vs ₹ mn) |
+| `value_conflict` | contradict | same context, values outside the band |
+| `period_subset` | reconcilable | one period contains the other (Q4 FY24 ⊂ FY24) |
+| `period_diff` | reconcilable | different periods that do **not** nest (FY24 vs FY25) |
+| `scope_diff` | reconcilable | standalone vs consolidated |
+| `basis_diff` | reconcilable | a different measure (GVA vs GDP, real vs nominal) |
+| `vintage_revision` | reconcilable | same period at a different stage of revision |
+| `unit_missing` | no-verdict | one side states no unit that resolves |
+| `unit_incomparable` | no-verdict | both units resolve but do not convert (% vs ₹, INR vs USD) |
+
+`period_diff` and `unit_incomparable` exist because the two cases they name are
+real and were otherwise being mislabelled. A non-nested period difference is
+still reconcilable per §2, but calling it `period_subset` would assert a
+containment that does not hold. And a missing unit is a gap in the source
+document, whereas two well-stated units that simply do not convert is a
+category error — the same verdict, but a different thing to go and fix.
+
+Where several context fields differ, `period` decides the reason code: a figure
+covering a different span of time is a different figure whatever else also
+changed. Every differing field is recorded alongside the code.
 
 `reason_code` is deterministic (from the context comparison); `reason_text` is the LLM's
 plain-English gloss. Show both in the UI — the code proves the logic, the text explains it.

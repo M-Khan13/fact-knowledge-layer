@@ -151,8 +151,11 @@ text explains it.
 The order of checks is the design:
 
 1. **Units first.** Two values that cannot be compared are never contradicted,
-   whatever the numbers say. No unit, an unresolvable unit, mismatched families
-   or two different currencies all produce `no-verdict` / `unit_missing`.
+   whatever the numbers say. A missing or unresolvable unit gives `no-verdict` /
+   `unit_missing`; two units that both resolve but do not convert — a percentage
+   against rupees, or rupees against dollars — give `unit_incomparable`. The two
+   are kept apart because one is a gap in the source and the other a category
+   error, which are different things to go and fix.
 2. **Context next.** Facts holding under different conditions are
    `reconcilable`, however far apart their values are.
 3. **Values last**, once the two facts are known to describe the same thing
@@ -168,7 +171,8 @@ The order of checks is the design:
 | `reconcilable` | `scope_diff` | consolidated against standalone |
 | `reconcilable` | `basis_diff` | a different measure |
 | `reconcilable` | `vintage_revision` | same period at a different stage of revision |
-| `no-verdict` | `unit_missing` | the two cannot be compared at all |
+| `no-verdict` | `unit_missing` | one side states no unit that resolves |
+| `no-verdict` | `unit_incomparable` | both units resolve but do not convert |
 
 Where several context fields differ, period decides the reason — a figure for a
 different span of time is a different figure whatever else also changed — and

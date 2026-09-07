@@ -46,7 +46,12 @@ REASON_SCOPE_DIFF = "scope_diff"
 REASON_BASIS_DIFF = "basis_diff"
 REASON_UNIT_DIFF_RESOLVED = "unit_diff_resolved"
 REASON_VINTAGE_REVISION = "vintage_revision"
+
+# Two distinct ways a comparison can be impossible, kept apart because they
+# call for different fixes: one is a gap in the source, the other is a category
+# error between two perfectly well-stated values.
 REASON_UNIT_MISSING = "unit_missing"
+REASON_UNIT_INCOMPARABLE = "unit_incomparable"
 
 # Which context field decides the reason when more than one differs. Period is
 # the most fundamental: a figure for a different span of time is a different
@@ -156,15 +161,17 @@ def default_reason_text(verdict: Verdict) -> str:
     code = verdict.reason_code
 
     if code == REASON_UNIT_MISSING:
-        if not first.has_resolved_unit or not second.has_resolved_unit:
-            return (
-                f"{left} and {right} cannot be compared: one of them has no "
-                "unit that resolves, so no verdict is possible."
-            )
+        unstated = first if not first.has_resolved_unit else second
+        return (
+            f"{left} and {right} cannot be compared: {unstated.source_doc} states "
+            "no unit that resolves, so no verdict is possible."
+        )
+
+    if code == REASON_UNIT_INCOMPARABLE:
         return (
             f"{left} and {right} are measured in different units "
-            f"({first.unit_canonical} against {second.unit_canonical}), "
-            "so they cannot be compared."
+            f"({first.unit_canonical} against {second.unit_canonical}), which are "
+            "not convertible here, so they cannot be compared."
         )
 
     if code == REASON_PERIOD_SUBSET:
@@ -252,8 +259,10 @@ def judge(pair: CandidatePair) -> Verdict:
 
     # 1. The unit gate. An unresolved or incompatible unit can never produce a
     #    contradiction, only an admission that the two cannot be compared.
-    if not is_comparable(first, second):
+    if not (first.has_resolved_unit and second.has_resolved_unit):
         return build(VERDICT_NO_VERDICT, REASON_UNIT_MISSING)
+    if not is_comparable(first, second):
+        return build(VERDICT_NO_VERDICT, REASON_UNIT_INCOMPARABLE)
 
     # 2. Context. Facts holding under different conditions are reconcilable,
     #    however far apart the numbers are.
