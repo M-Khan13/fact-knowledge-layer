@@ -381,6 +381,31 @@ def get_client(api_key: str | None = None):
     return genai.Client(api_key=key)
 
 
+class QuotaExhausted(RuntimeError):
+    """A quota that will not clear by retrying: the run has to stop."""
+
+
+def _quota_details(exc: Exception) -> tuple[bool, float | None]:
+    """Whether a rate-limit refusal is a long-window quota, and any retry delay.
+
+    A per-minute limit clears in seconds and is worth waiting for. A per-day
+    one does not, and retrying against it only burns more of it. The server
+    says which, so this reads the answer rather than guessing.
+    """
+    message = str(getattr(exc, "message", "") or exc)
+    daily = "PerDay" in message or "per day" in message.lower()
+
+    delay = None
+    match = re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s", message)
+    if match:
+        delay = float(match.group(1))
+    else:
+        match = re.search(r"retry in (\d+(?:\.\d+)?)s", message)
+        if match:
+            delay = float(match.group(1))
+    return daily, delay
+
+
 def _status_of(exc: Exception) -> int | None:
     return getattr(exc, "code", None) or getattr(exc, "status_code", None)
 
@@ -456,6 +481,21 @@ def generate_text(
             return response.text or ""
         except errors.APIError as exc:
             status = _status_of(exc)
+            if status == 429:
+                daily, retry_after = _quota_details(exc)
+                if daily:
+                    # Retrying cannot help and would spend more of the quota.
+                    raise QuotaExhausted(
+                        "The API quota for this model is exhausted and will not "
+                        "clear by retrying. Wait for the quota window to reset, "
+                        "raise the limit, or switch model. Work already finished "
+                        "has been saved."
+                    ) from exc
+                if attempt < max_attempts - 1:
+                    last_error = exc
+                    # The server says how long to wait; believe it over a guess.
+                    sleep(retry_after if retry_after else _sleep_for(attempt))
+                    continue
             if status not in RETRYABLE_STATUS or attempt == max_attempts - 1:
                 raise
             last_error = exc

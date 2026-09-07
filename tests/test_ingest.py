@@ -265,3 +265,18 @@ def test_requesting_pages_a_document_does_not_have_reads_nothing(db, fixture_pat
 
     assert report.pages_processed == 0
     assert client.calls == 0
+
+
+def test_a_finished_document_survives_a_later_failure(db, fixture_path, parsed_doc):
+    """Extraction is expensive; one document's work must not be rolled back."""
+    replies, _ = scripted_replies(parsed_doc)
+    ingest_pdf(fixture_path, "sample", db, client=ScriptedClient(replies))
+
+    # A fresh connection sees only what was committed.
+    from backend import store as store_module
+
+    other = store_module.connect(db.execute("PRAGMA database_list").fetchone()[2])
+    try:
+        assert store_module.count_facts(other, "sample") > 0
+    finally:
+        other.close()

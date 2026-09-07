@@ -264,5 +264,8 @@ def ingest_pdf(
             1 for fact in report.facts if not fact.has_resolved_unit
         )
         store.save_facts(conn, report.facts)
+        # A document is the unit of work, and extraction is expensive enough
+        # that finishing one must survive a later one failing.
+        conn.commit()
 
     return report

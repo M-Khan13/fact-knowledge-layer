@@ -347,3 +347,41 @@ def test_the_digit_rule_can_be_turned_off():
     kept, dropped = drop_valueless(facts, require_digit_with_unit=False)
 
     assert len(kept) == 1 and dropped == []
+
+
+def test_a_daily_quota_stops_the_run_instead_of_retrying():
+    """Retrying a quota that resets tomorrow only spends more of it."""
+    from backend.pipeline.extraction import QuotaExhausted
+
+    refusal = errors.ClientError(
+        429,
+        {"error": {"message": "Quota exceeded. quotaId: "
+                              "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}},
+    )
+    client = StubClient([refusal, "[]"])
+
+    with pytest.raises(QuotaExhausted):
+        generate_text(client, "prompt", sleep=lambda _s: None)
+    assert client.calls == 1, "no further calls against an exhausted quota"
+
+
+def test_a_short_window_limit_waits_as_long_as_the_server_asks():
+    refusal = errors.ClientError(
+        429, {"error": {"message": "Too many requests. retryDelay: 12s"}}
+    )
+    client = StubClient([refusal, "[]"])
+    slept = []
+
+    assert generate_text(client, "prompt", sleep=slept.append) == "[]"
+    assert slept == [12.0], "the server's own delay beats a guessed backoff"
+
+
+def test_quota_details_reads_the_server_reply():
+    from backend.pipeline.extraction import _quota_details
+
+    daily = errors.ClientError(429, {"error": {"message": "quotaId: ...PerDayPerProject..."}})
+    assert _quota_details(daily)[0] is True
+    assert _quota_details(errors.ClientError(429, {"error": {"message": "slow down"}})) == (
+        False,
+        None,
+    )
