@@ -23,12 +23,28 @@ def _path_setting(name: str, default: str) -> Path:
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_EXTRACTION_MODEL = os.getenv("GEMINI_EXTRACTION_MODEL", "gemini-2.5-flash")
-GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
+GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
 
 DATABASE_PATH = _path_setting("DATABASE_PATH", "data/facts.db")
 UPLOAD_DIR = _path_setting("UPLOAD_DIR", "data/uploads")
+
+# Where source PDFs are read from when a script is not given an explicit path.
+# Always configured, never hardcoded to a machine-specific location.
+INPUT_DIR = _path_setting("INPUT_DIR", "data/input")
 
 
 def has_gemini_key() -> bool:
     """True when an API key is configured. Never exposes the key itself."""
     return bool(GEMINI_API_KEY.strip())
+
+
+def resolve_input_dir(override: str | None = None) -> Path:
+    """Pick the PDF input directory: an explicit argument wins over INPUT_DIR.
+
+    Lets a caller pass --input on the command line while still defaulting to
+    the configured location, so no source path is baked into the code.
+    """
+    if override:
+        path = Path(override).expanduser()
+        return path if path.is_absolute() else REPO_ROOT / path
+    return INPUT_DIR

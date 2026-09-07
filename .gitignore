@@ -39,10 +39,15 @@ pnpm-debug.log*
 *.sqlite3
 *.db-journal
 
-# Uploaded / generated artefacts
+# Uploaded / generated artefacts. Source PDFs live outside the repo and are
+# pointed at via INPUT_DIR, so no PDF is committed...
 data/uploads/
 data/renders/
-data/*.pdf
+data/input/
+*.pdf
+
+# ...except the small excerpt the grounding tests run against.
+!tests/fixtures/*.pdf
 
 # OS / editor / local tooling
 .DS_Store

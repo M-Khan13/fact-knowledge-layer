@@ -6,7 +6,7 @@ python-multipart
 PyMuPDF
 pdfplumber
 
-google-generativeai
+google-genai
 numpy
 
 pytest
