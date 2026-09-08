@@ -142,3 +142,31 @@ def test_the_group_is_not_bound_to_a_directors_number():
 
     assert facts[2].subject_key == "name:acme logistics"
     assert facts[0].subject_key == "DIN:01173669", "the director keeps their own key"
+
+
+def test_the_board_rule_is_idempotent():
+    """Re-normalizing must not reclassify a resignation as a designation.
+
+    Once mapped, both facts carry the board_status attribute; classifying from
+    that instead of the document's own wording would flip every resignation to
+    active on the second pass.
+    """
+    from backend.pipeline.normalization import normalize_board_status
+
+    resigned = make(
+        "resignation_effective_date", "August 24, 2023",
+        subject="Suvir Suren Sujan", evidence="(DIN: 01173669), resigned from the Board",
+    )
+    active = make(
+        "designation", "Non-Executive Nominee Director",
+        subject="Suvir Suren Sujan", evidence="DIN: 01173669 Non-Executive Nominee Director",
+    )
+
+    for _ in range(3):
+        normalize_board_status([resigned, active])
+
+    assert resigned.category == "resigned"
+    assert resigned.attribute == "board_status"
+    assert resigned.attribute_raw == "resignation_effective_date"
+    assert active.category == "active"
+    assert active.attribute_raw == "designation"

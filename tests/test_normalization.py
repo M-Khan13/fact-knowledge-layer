@@ -456,3 +456,34 @@ def test_a_bracketed_negative_survives_a_trailing_unit():
     # Unbracketed figures are untouched.
     assert parse_number("452 Cr") == 452
     assert parse_number("8,142") == 8142
+
+
+def test_a_categorical_fact_keeps_its_confidence():
+    """A board status has no unit to be missing, so the penalty is not its fault."""
+    status = make_fact(value_raw="Non-Executive Nominee Director", unit=None, confidence=0.95)
+    date = make_fact(value_raw="August 24, 2023", unit=None, confidence=0.92)
+
+    normalize_fact(status)
+    normalize_fact(date)
+
+    assert status.confidence == 0.95
+    assert date.confidence == 0.92
+    assert status.is_categorical and date.is_categorical
+
+
+def test_a_measurement_without_a_unit_is_still_capped():
+    """The unit-blind ban is untouched: a bare number is still penalised."""
+    bare = make_fact(value_raw="740", unit=None, confidence=0.95)
+
+    normalize_fact(bare)
+
+    assert bare.confidence == UNRESOLVED_UNIT_CONFIDENCE
+    assert not bare.is_categorical
+
+
+def test_a_resolved_measurement_keeps_its_confidence():
+    resolved = make_fact(value_raw="8,142", unit="₹ Cr", confidence=0.95)
+
+    normalize_fact(resolved)
+
+    assert resolved.confidence == 0.95

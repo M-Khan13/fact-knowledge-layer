@@ -18,8 +18,9 @@ from backend.pipeline.schema import ContextSignature, Fact
 from backend.pipeline.temporal import parse_period
 from backend.pipeline.units import ResolvedUnit, parse_number, parse_unit
 
-# Confidence ceiling for a fact whose unit could not be resolved. Such a fact is
-# never auto-contradicted; it can only ever reach no-verdict.
+# Confidence ceiling for a *measurement* whose unit could not be resolved. Such
+# a fact is never auto-contradicted; it can only ever reach no-verdict. It does
+# not apply to categorical facts, which have no unit to be missing.
 UNRESOLVED_UNIT_CONFIDENCE = 0.4
 
 CONSOLIDATED = "consolidated"
@@ -196,7 +197,10 @@ def normalize_fact(fact: Fact) -> Fact:
         fact.subject, fact.subject_key, fact.evidence_span
     )
 
-    if unit is None or fact.value_num is None:
+    # The cap exists because a measurement with no resolvable unit cannot be
+    # trusted as a quantity. A categorical fact has no quantity to resolve and
+    # no unit to be missing, so the penalty would be for a fault it cannot have.
+    if not fact.is_categorical and (unit is None or fact.value_num is None):
         fact.confidence = min(fact.confidence, UNRESOLVED_UNIT_CONFIDENCE)
 
     fact.normalized = True
@@ -240,8 +244,7 @@ BOARD_STATUS_ATTRIBUTE = "board_status"
 # ordinary "designation" elsewhere in a document is left alone.
 BOARD_STATUS_RULES: tuple[tuple[str, str], ...] = (
     (r"resign|cessation|ceased|demitted|stepped[_\s-]?down", "resigned"),
-    (r"\bdesignation\b|\bappointment\b|\brole\b|\bposition\b|\bboard[_\s-]?status\b",
-     "active"),
+    (r"\bdesignation\b|\bappointment\b|\brole\b|\bposition\b", "active"),
 )
 
 
@@ -261,7 +264,11 @@ def normalize_board_status(facts: list[Fact]) -> list[Fact]:
     for fact in facts:
         if not (fact.subject_key or "").startswith("DIN:"):
             continue
-        attribute = re.sub(r"[_\-]+", " ", (fact.attribute or "").lower())
+        # Read the attribute the document used, not one a previous pass wrote.
+        # Re-normalizing must not reclassify a resignation as a designation
+        # just because both now share the board_status attribute.
+        original = fact.attribute_raw or fact.attribute
+        attribute = re.sub(r"[_\-]+", " ", (original or "").lower())
         for pattern, status in BOARD_STATUS_RULES:
             if re.search(pattern, attribute):
                 fact.attribute_raw = fact.attribute_raw or fact.attribute
