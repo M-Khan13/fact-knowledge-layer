@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -118,10 +119,24 @@ class Verdict:
 
 
 def _format_value(fact: Fact) -> str:
-    """The value as the document wrote it, with its unit."""
-    written = fact.value_raw or ""
-    unit = fact.unit or fact.unit_raw
-    return f"{written} {unit}".strip() if unit else written
+    """The value as the document wrote it, with its unit.
+
+    The unit is only appended where the written value does not already carry
+    it, so "6.5 percent" is not rendered as "6.5 percent percent".
+    """
+    written = (fact.value_raw or "").strip()
+    unit = (fact.unit or fact.unit_raw or "").strip()
+    if not unit:
+        return written
+
+    # Compared word by word, since a unit's words may be split across the value
+    # ("USD 640.3 billion" already says everything "USD_billion" would add).
+    def words(text: str) -> set[str]:
+        return {word for word in re.split(r"[\s_]+", text.lower()) if word}
+
+    if words(unit) <= words(written):
+        return written
+    return f"{written} {unit}".strip()
 
 
 def _describe_period(fact: Fact) -> str:

@@ -500,3 +500,15 @@ def test_the_part_of_whole_sentence_names_the_whole_correctly():
         text = result.reason_text
         assert text.startswith("FY2024 covers Q4 FY2024"), text
         assert "2,076 ₹ Cr is a part of 8,142 ₹ Cr" in text, text
+
+
+def test_a_value_that_states_its_own_unit_is_not_repeated():
+    """The reason text is read by a person: "6.5 percent percent" will not do."""
+    from backend.pipeline.reconciliation import _format_value
+
+    assert _format_value(fact("6.5 percent", unit="percent")) == "6.5 percent"
+    assert _format_value(fact("6.5", unit="percent")) == "6.5 percent"
+    assert _format_value(fact("8,142", unit="₹ Cr")) == "8,142 ₹ Cr"
+    assert _format_value(fact("USD 640.3 billion", unit="USD_billion")) == (
+        "USD 640.3 billion"
+    )

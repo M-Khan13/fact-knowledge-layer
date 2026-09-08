@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict, dataclass, field
 
+from backend.pipeline import basis as basis_rules
 from backend.pipeline.parsing import BBox
 from backend.pipeline.temporal import Period
 
@@ -41,7 +42,10 @@ class ContextSignature:
             differences.append("period")
         if self.scope != other.scope:
             differences.append("scope")
-        if self.basis != other.basis:
+        # Bases are compared by the axes they actually pin down, so a figure
+        # described as "real" and one described as "at market prices" are not
+        # treated as measuring different things.
+        if basis_rules.conflict(self.basis, other.basis):
             differences.append("basis")
         if self.vintage != other.vintage:
             differences.append("vintage")
