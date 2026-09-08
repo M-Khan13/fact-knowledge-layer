@@ -129,7 +129,13 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     target = Path(path) if path is not None else config.DATABASE_PATH
     if str(target) != ":memory:":
         target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(target)
+    # A connection is opened per request, but FastAPI runs a sync dependency
+    # and the sync endpoint it feeds on different threadpool threads, so the
+    # connection is handed between threads even though only one thread ever
+    # uses it at a time. sqlite3's same-thread check cannot tell the two apart
+    # and rejects the handoff, so it is turned off here rather than sharing a
+    # connection across concurrent requests, which this never does.
+    conn = sqlite3.connect(target, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
