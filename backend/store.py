@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS facts (
     unit_raw         TEXT,
     unit_canonical   TEXT,
     unit_family      TEXT,
+    category         TEXT,
+    attribute_raw    TEXT,
     sig_period_type  TEXT,
     sig_fiscal_year  INTEGER,
     sig_sub_period   TEXT,
@@ -89,6 +91,8 @@ ADDED_COLUMNS: dict[str, str] = {
     "unit_raw": "TEXT",
     "unit_canonical": "TEXT",
     "unit_family": "TEXT",
+    "category": "TEXT",
+    "attribute_raw": "TEXT",
     "sig_period_type": "TEXT",
     "sig_fiscal_year": "INTEGER",
     "sig_sub_period": "TEXT",
@@ -217,6 +221,8 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             fact.unit_raw,
             fact.unit_canonical,
             fact.unit_family,
+            fact.category,
+            fact.attribute_raw,
             sig.period.period_type if sig else None,
             sig.period.fiscal_year if sig else None,
             sig.period.sub_period if sig else None,
@@ -239,13 +245,17 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             context_basis, context_vintage, source_doc, page, page_label,
             evidence_span, rects, grounding_method, grounding_score,
             confidence, created_at, unit_raw, unit_canonical, unit_family,
+            category, attribute_raw,
             sig_period_type, sig_fiscal_year, sig_sub_period, sig_period_raw,
             sig_scope, sig_basis, sig_vintage, normalized
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(fact_id) DO UPDATE SET
             -- Re-normalizing can tie a subject to an identifier it did not have
             -- before, so the resolved key has to be updatable.
             subject_key     = excluded.subject_key,
+            -- Normalization can map an attribute onto a shared one, so it has
+            -- to be updatable too; attribute_raw keeps the original wording.
+            attribute       = excluded.attribute,
             value_num       = excluded.value_num,
             unit            = excluded.unit,
             context_period  = excluded.context_period,
@@ -261,6 +271,8 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             unit_raw        = excluded.unit_raw,
             unit_canonical  = excluded.unit_canonical,
             unit_family     = excluded.unit_family,
+            category        = excluded.category,
+            attribute_raw   = excluded.attribute_raw,
             sig_period_type = excluded.sig_period_type,
             sig_fiscal_year = excluded.sig_fiscal_year,
             sig_sub_period  = excluded.sig_sub_period,
@@ -323,6 +335,8 @@ def _row_to_fact(row: sqlite3.Row) -> Fact:
         unit_raw=row["unit_raw"],
         unit_canonical=row["unit_canonical"],
         unit_family=row["unit_family"],
+        category=row["category"],
+        attribute_raw=row["attribute_raw"],
         normalized=bool(row["normalized"]),
         signature=ContextSignature(
             period=Period(

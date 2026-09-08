@@ -512,3 +512,76 @@ def test_a_value_that_states_its_own_unit_is_not_repeated():
     assert _format_value(fact("USD 640.3 billion", unit="USD_billion")) == (
         "USD 640.3 billion"
     )
+
+
+# --- States, where there is no magnitude to weigh --------------------------
+
+
+def categorical(value, doc="doc_a", attribute="board_status", category=None, **ctx):
+    built = fact(value, unit=None, doc=doc, attribute=attribute, **ctx)
+    built.category = category
+    return built
+
+
+def test_two_states_that_agree_corroborate():
+    result = verdict_for(
+        categorical("Non-Executive Nominee Director", category="active"),
+        categorical("Nominee Director", doc="doc_b", category="active"),
+    )
+
+    assert result.verdict == VERDICT_CORROBORATE
+    assert result.reason_code == "same_category"
+
+
+def test_two_states_that_differ_contradict():
+    """Being on a board and having left it are opposites, not a near miss."""
+    result = verdict_for(
+        categorical("Non-Executive Nominee Director", category="active"),
+        categorical("August 24, 2023", doc="doc_b", category="resigned"),
+    )
+
+    assert result.verdict == VERDICT_CONTRADICT
+    assert result.reason_code == "category_conflict"
+    assert "cannot be both" in result.reason_text
+
+
+def test_states_fall_back_to_their_written_value():
+    same = verdict_for(
+        categorical("Managing Director & CEO"),
+        categorical("managing director & ceo", doc="doc_b"),
+    )
+    different = verdict_for(
+        categorical("Managing Director"), categorical("Chief Risk Officer", doc="doc_b")
+    )
+
+    assert same.verdict == VERDICT_CORROBORATE
+    assert different.verdict == VERDICT_CONTRADICT
+
+
+def test_a_measurement_against_a_state_is_still_no_verdict():
+    """One side is a quantity and the other is not; nothing can be compared."""
+    result = verdict_for(
+        fact("8,142", unit="₹ Cr"), categorical("resigned", doc="doc_b", category="resigned")
+    )
+
+    assert result.verdict == VERDICT_NO_VERDICT
+    assert result.reason_code == REASON_UNIT_MISSING
+
+
+def test_a_unitless_number_is_not_treated_as_a_category():
+    """The ban on comparing unresolved measurements is untouched."""
+    result = verdict_for(fact("740", unit=None), fact("8,142", unit=None, doc="doc_b"))
+
+    assert result.verdict == VERDICT_NO_VERDICT
+    assert result.reason_code == REASON_UNIT_MISSING
+
+
+def test_a_differing_context_still_reconciles_a_state():
+    """Context is checked before the category, exactly as for a measurement."""
+    result = verdict_for(
+        categorical("Director", category="active", period="FY23"),
+        categorical("resigned", doc="doc_b", category="resigned", period="FY25"),
+    )
+
+    assert result.verdict == VERDICT_RECONCILABLE
+    assert result.reason_code == REASON_PERIOD_DIFF

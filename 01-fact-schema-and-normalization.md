@@ -113,7 +113,8 @@ around LLM behaviour" mindset Superjoin says they hire for.
   verdict: corroborate | contradict | reconcilable | no-verdict,
   reason_code: same_value | value_conflict | period_subset | period_diff |
                scope_diff | basis_diff | unit_diff_resolved | vintage_revision |
-               unit_missing | unit_incomparable,
+               unit_missing | unit_incomparable | context_unstated |
+               same_category | category_conflict,
   reason_text: "<one human line the LLM writes>",
   confidence
 }
@@ -133,6 +134,17 @@ Reason codes in full:
 | `vintage_revision` | reconcilable | same period at a different stage of revision |
 | `unit_missing` | no-verdict | one side states no unit that resolves |
 | `unit_incomparable` | no-verdict | both units resolve but do not convert (% vs ₹, INR vs USD) |
+| `context_unstated` | no-verdict | values differ, but one side leaves a condition unstated that could account for it |
+| `same_category` | corroborate | two categorical facts report the same state |
+| `category_conflict` | contradict | two categorical facts report opposite states (on the board vs resigned) |
+
+Facts split into two kinds. A fact whose value reads as a quantity is a
+**measurement**, compared by magnitude within the unit rules above. A fact
+whose value does not read as a number is **categorical** - a status, a role, a
+date - and is compared by category, since there is no magnitude to weigh. A
+measurement against a category is neither, and reaches `unit_missing`. A bare
+number with no unit stays a measurement, so the unit-blind ban still holds for
+it: "740" is never treated as a category.
 
 `period_diff` and `unit_incomparable` exist because the two cases they name are
 real and were otherwise being mislabelled. A non-nested period difference is

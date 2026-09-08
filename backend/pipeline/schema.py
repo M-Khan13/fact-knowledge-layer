@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from backend.pipeline import basis as basis_rules
 from backend.pipeline.parsing import BBox
 from backend.pipeline.temporal import Period
+from backend.pipeline.units import parse_number
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,10 @@ class Fact:
     unit_raw: str | None = None
     unit_canonical: str | None = None
     unit_family: str | None = None
+    # A fact whose value is a state rather than a quantity: "active",
+    # "resigned". The written value and its evidence are left untouched.
+    category: str | None = None
+    attribute_raw: str | None = None
     signature: ContextSignature | None = None
     normalized: bool = False
 
@@ -148,6 +153,23 @@ class Fact:
     def has_resolved_unit(self) -> bool:
         """Whether this fact may take part in a value comparison at all."""
         return self.unit_canonical is not None and self.value_num is not None
+
+    @property
+    def is_categorical(self) -> bool:
+        """Whether this fact states a category rather than a measurement.
+
+        A value that carries no resolvable quantity is a state, a name or a
+        date. Deciding this on whether the value reads as a *number* rather
+        than merely on the absence of a unit is what keeps a bare unitless
+        figure out: "740" stays an unresolved measurement, and the ban on
+        comparing it still holds.
+        """
+        if self.has_resolved_unit:
+            return False
+        if self.category:
+            return True
+        value = (self.value_raw or "").strip()
+        return bool(value) and parse_number(value) is None
 
     def as_dict(self) -> dict:
         payload = asdict(self)

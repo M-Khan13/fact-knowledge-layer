@@ -72,7 +72,10 @@ FAMILY_POINT = "percentage_point"
 FAMILY_RATIO = "ratio"
 FAMILY_OTHER = "other"
 
-_NUMBER_RE = re.compile(r"[-+]?\d(?:[\d,\s]*\d)?(?:\.\d+)?")
+# Digit grouping never puts whitespace after a separator, so a comma must be
+# followed straight away by digits. Allowing a space made "August 24, 2023"
+# read as the single number 242023, turning a date into a measurement.
+_NUMBER_RE = re.compile(r"[-+]?\d+(?:,\d{2,3})*(?:\.\d+)?")
 
 
 @dataclass(frozen=True)

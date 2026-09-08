@@ -169,3 +169,19 @@ def test_a_resolved_subject_key_can_be_updated(db, fixture_path, parsed_doc):
     store.save_facts(db, [fact])
 
     assert store.get_fact(db, fact.fact_id).subject_key == "DIN:01173669"
+
+
+def test_a_normalized_attribute_can_be_updated(db, fixture_path, parsed_doc):
+    """Normalization may map an attribute onto a shared one for comparison."""
+    report = ingest(db, fixture_path, parsed_doc)
+    fact = report.facts[0]
+
+    fact.attribute_raw = fact.attribute
+    fact.attribute = "board_status"
+    fact.category = "active"
+    store.save_facts(db, [fact])
+
+    reloaded = store.get_fact(db, fact.fact_id)
+    assert reloaded.attribute == "board_status"
+    assert reloaded.attribute_raw == report.facts[0].attribute_raw
+    assert reloaded.category == "active"

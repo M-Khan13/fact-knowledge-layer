@@ -233,6 +233,44 @@ def resolve_self_references(facts: list[Fact]) -> list[Fact]:
     return facts
 
 
+BOARD_STATUS_ATTRIBUTE = "board_status"
+
+# What a board fact says about whether someone is still on the board. Checked
+# in order, and only for a subject identified by a director's number, so an
+# ordinary "designation" elsewhere in a document is left alone.
+BOARD_STATUS_RULES: tuple[tuple[str, str], ...] = (
+    (r"resign|cessation|ceased|demitted|stepped[_\s-]?down", "resigned"),
+    (r"\bdesignation\b|\bappointment\b|\brole\b|\bposition\b|\bboard[_\s-]?status\b",
+     "active"),
+)
+
+
+def normalize_board_status(facts: list[Fact]) -> list[Fact]:
+    """Give board facts one attribute so they can be compared at all.
+
+    One filing records a director's designation, another records the date they
+    resigned. Both answer the same question - is this person on the board - but
+    under different attribute names, so they never meet. Mapping them onto a
+    shared attribute with a category value is what lets the two documents
+    disagree out loud.
+
+    The written value and its evidence are untouched; the original attribute is
+    kept alongside. Only subjects identified by a director's number qualify, so
+    a "designation" that is not about a director is unaffected.
+    """
+    for fact in facts:
+        if not (fact.subject_key or "").startswith("DIN:"):
+            continue
+        attribute = re.sub(r"[_\-]+", " ", (fact.attribute or "").lower())
+        for pattern, status in BOARD_STATUS_RULES:
+            if re.search(pattern, attribute):
+                fact.attribute_raw = fact.attribute_raw or fact.attribute
+                fact.attribute = BOARD_STATUS_ATTRIBUTE
+                fact.category = status
+                break
+    return facts
+
+
 def bind_strong_keys(facts: list[Fact]) -> list[Fact]:
     """Upgrade name-based subjects to an identifier the document states for them.
 
@@ -282,7 +320,9 @@ def normalize_facts(facts: list[Fact]) -> list[Fact]:
     for fact in facts:
         normalize_fact(fact)
     resolve_self_references(facts)
-    return bind_strong_keys(facts)
+    bind_strong_keys(facts)
+    # Runs last: it depends on subjects already carrying their identifier.
+    return normalize_board_status(facts)
 
 
 def is_comparable(first: Fact, second: Fact) -> bool:

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from backend.pipeline.matching import CandidatePair, find_candidates
 from backend.pipeline.normalization import (
+    canonical_token,
     decimals_of,
     is_comparable,
     newer_vintage,
@@ -57,6 +58,11 @@ REASON_UNIT_INCOMPARABLE = "unit_incomparable"
 # Values differ, but one side left a condition unstated that could account for
 # it. Not agreement, and not a contradiction either.
 REASON_CONTEXT_UNSTATED = "context_unstated"
+
+# Facts whose value is a state rather than a quantity: on the board or off it.
+# They are compared as categories, since there is no magnitude to weigh.
+REASON_SAME_CATEGORY = "same_category"
+REASON_CATEGORY_CONFLICT = "category_conflict"
 
 # Which context field decides the reason when more than one differs. Period is
 # the most fundamental: a figure for a different span of time is a different
@@ -143,6 +149,11 @@ def _format_value(fact: Fact) -> str:
     if words(unit) <= words(written):
         return written
     return f"{written} {unit}".strip()
+
+
+def _category_of(fact: Fact) -> str | None:
+    """The state a categorical fact reports, normalized for comparison."""
+    return fact.category or canonical_token(fact.value_raw)
 
 
 def _describe_period(fact: Fact) -> str:
@@ -254,6 +265,19 @@ def default_reason_text(verdict: Verdict) -> str:
             "a conflict."
         )
 
+    if code == REASON_SAME_CATEGORY:
+        return (
+            f"Both record {_category_of(first)} for {first.attribute}, so the two "
+            "documents say the same thing."
+        )
+
+    if code == REASON_CATEGORY_CONFLICT:
+        return (
+            f"{first.source_doc} records {first.attribute} as "
+            f"{_category_of(first)} while {second.source_doc} records it as "
+            f"{_category_of(second)}. The same subject cannot be both."
+        )
+
     if code == REASON_SAME_VALUE:
         return f"Both report {left} and {right} for {_describe_period(first)}, which agree."
 
@@ -293,12 +317,20 @@ def judge(pair: CandidatePair) -> Verdict:
         result.reason_text = default_reason_text(result)
         return result
 
-    # 1. The unit gate. An unresolved or incompatible unit can never produce a
-    #    contradiction, only an admission that the two cannot be compared.
-    if not (first.has_resolved_unit and second.has_resolved_unit):
+    # 1. What kind of pair is this? Two measurements are weighed against each
+    #    other; two states are compared as categories. A measurement against a
+    #    state is neither, and a value with no resolvable quantity is still
+    #    barred from comparison exactly as before.
+    numeric = first.has_resolved_unit and second.has_resolved_unit
+    categorical = (
+        not numeric and first.is_categorical and second.is_categorical
+    )
+
+    if numeric:
+        if not is_comparable(first, second):
+            return build(VERDICT_NO_VERDICT, REASON_UNIT_INCOMPARABLE)
+    elif not categorical:
         return build(VERDICT_NO_VERDICT, REASON_UNIT_MISSING)
-    if not is_comparable(first, second):
-        return build(VERDICT_NO_VERDICT, REASON_UNIT_INCOMPARABLE)
 
     # 2. Context. Facts holding under different conditions are reconcilable,
     #    however far apart the numbers are.
@@ -328,6 +360,16 @@ def judge(pair: CandidatePair) -> Verdict:
                 return build(
                     VERDICT_RECONCILABLE, REASON_VINTAGE_REVISION, differing=differing
                 )
+
+    # 3a. States, where there is no magnitude to weigh. Being on a board and
+    #     having left it are not a near miss; they are opposites.
+    if categorical:
+        left, right = _category_of(first), _category_of(second)
+        if left is not None and left == right:
+            return build(VERDICT_CORROBORATE, REASON_SAME_CATEGORY, unstated=unstated)
+        if unstated:
+            return build(VERDICT_NO_VERDICT, REASON_CONTEXT_UNSTATED, unstated=unstated)
+        return build(VERDICT_CONTRADICT, REASON_CATEGORY_CONFLICT)
 
     # 3. Values, now that the two are known to describe the same thing.
     unit = parse_unit(first.unit, first.value_raw)
