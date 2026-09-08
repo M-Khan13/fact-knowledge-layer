@@ -125,11 +125,17 @@ a { color: inherit; }
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(58% 46% at 18% 12%, rgba(214, 214, 220, 0.13), transparent 68%),
-    radial-gradient(46% 40% at 84% 26%, rgba(168, 172, 180, 0.085), transparent 70%),
-    radial-gradient(64% 52% at 62% 88%, rgba(126, 130, 138, 0.075), transparent 72%),
-    radial-gradient(40% 34% at 34% 64%, rgba(236, 238, 242, 0.05), transparent 70%),
-    linear-gradient(168deg, #08080a 0%, #141417 46%, #0a0a0c 100%);
+    /* Muted gold and sand across the top, where the heading sits. */
+    radial-gradient(56% 44% at 16% 8%, rgba(226, 183, 126, 0.17), transparent 68%),
+    radial-gradient(48% 42% at 82% 20%, rgba(210, 172, 128, 0.12), transparent 70%),
+    /* A dusty rose wash lower right, warm grey opposite it, both very faint. */
+    radial-gradient(60% 52% at 74% 70%, rgba(182, 134, 130, 0.14), transparent 72%),
+    radial-gradient(54% 46% at 20% 80%, rgba(162, 141, 128, 0.10), transparent 72%),
+    /* One pale highlight so the middle does not read as a flat panel. */
+    radial-gradient(38% 32% at 46% 44%, rgba(244, 228, 208, 0.05), transparent 70%),
+    /* The base is a warm black rather than a blue one, so the blooms sit in it
+       instead of on top of it. */
+    linear-gradient(168deg, #0a0807 0%, #17120e 44%, #0b0908 100%);
 }
 
 /* A faint grain keeps the large gradient from banding on wide displays. */
@@ -159,13 +165,20 @@ a { color: inherit; }
   font-family: var(--serif);
   font-weight: 400;
   font-size: clamp(38px, 5.4vw, 64px);
-  line-height: 1.16;
+  line-height: 1.18;
   letter-spacing: -0.015em;
   margin: 0 0 26px;
-  /* Wide enough for two even lines rather than three cramped ones; `balance`
-     then evens the words across them instead of leaving one word stranded. */
-  max-width: 20ch;
-  text-wrap: balance;
+  /* The break is explicit because the shape is the point: a long first line
+     descending to a short second one. Left to itself the text balances into
+     two even lines instead. */
+  max-width: 22ch;
+}
+
+/* Below this the full first line no longer fits, so the break is dropped and
+   the heading wraps on its own. The spaces either side of it in the markup
+   keep the words apart once it stops breaking. */
+@media (max-width: 620px) {
+  .hero__break { display: none; }
 }
 
 .hero__lede {
@@ -235,8 +248,9 @@ a { color: inherit; }
 .btn-accent:hover { filter: brightness(1.07); }
 
 .btn-accent[aria-disabled="true"] {
-  background: rgba(227, 180, 137, 0.24);
-  color: rgba(236, 231, 223, 0.5);
+  background: rgba(227, 180, 137, 0.3);
+  color: rgba(245, 232, 216, 0.58);
+  box-shadow: 0 0 34px rgba(227, 180, 137, 0.14);
   cursor: not-allowed;
 }
 

@@ -69,7 +69,9 @@ export default function Landing() {
       <NavBar />
 
       <div className="landing__body">
-        <h1 className="hero__title">Turn documents into grounded facts</h1>
+        <h1 className="hero__title">
+          Turn documents into <br className="hero__break" /> grounded facts
+        </h1>
         <p className="hero__lede">
           Upload a set of PDFs. Every claim is extracted, tied to its page, and
           reconciled against the rest.
