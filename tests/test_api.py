@@ -392,3 +392,35 @@ def test_the_debug_view_escapes_stored_text(client):
 
     assert "<script>x</script>" not in client.get("/").text
     assert "&lt;script&gt;" in client.get("/").text
+
+
+# --- Cross-origin access for the UI ----------------------------------------
+
+
+def test_the_dev_ui_origin_is_allowed(client):
+    """The React dev server runs on another port, so the browser needs this."""
+    response = client.get("/health", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_a_preflight_is_answered(client):
+    response = client.options(
+        "/collections/macro/facts",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_an_unlisted_origin_is_not_allowed(client):
+    """Only the configured origins are let through, never anything that asks."""
+    response = client.get("/health", headers={"Origin": "http://evil.example.com"})
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers

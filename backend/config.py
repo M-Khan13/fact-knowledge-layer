@@ -57,6 +57,18 @@ REQUIRE_DIGIT_WITH_UNIT = os.getenv("REQUIRE_DIGIT_WITH_UNIT", "true").strip().l
 }
 
 
+# Browser origins allowed to call the API. The React dev server runs on its own
+# port, so without this the browser blocks every request it makes. Deliberately
+# a list rather than a wildcard: only the origins named here are let through.
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if origin.strip()
+]
+
+
 def has_gemini_key() -> bool:
     """True when an API key is configured. Never exposes the key itself."""
     return bool(GEMINI_API_KEY.strip())

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Iterator
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
@@ -41,6 +42,18 @@ app = FastAPI(
     ),
     version="0.6.0",
 )
+
+
+# The UI is served from its own dev-server port, so the browser treats it as a
+# different origin and blocks the calls unless they are allowed here. Only the
+# configured origins are permitted, never a wildcard.
+if config.CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.CORS_ORIGINS,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 
 def get_db() -> Iterator[sqlite3.Connection]:
