@@ -85,17 +85,6 @@ export default function Landing() {
         */}
         <div className="dropzone">
           <div className="dropzone__inner">
-            <div className="dropzone__icon" aria-hidden="true">
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M8 13V3M8 3L4 7M8 3l4 4"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
             <div className="dropzone__title">Drop PDFs here</div>
             <div className="dropzone__hint">or choose files · up to 50 documents</div>
             <button
@@ -106,6 +95,15 @@ export default function Landing() {
               title="Ingestion runs offline through scripts/ingest.py; this interface only reads."
             >
               Upload
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 13V3M8 3L4 7M8 3l4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
           </div>
         </div>

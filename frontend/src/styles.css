@@ -211,23 +211,17 @@ a { color: inherit; }
   gap: clamp(4px, 0.9vh, 9px);
 }
 
-.dropzone__icon {
-  width: clamp(28px, 3.6vh, 34px);
-  height: clamp(28px, 3.6vh, 34px);
-  border-radius: 9px;
-  border: 1px solid var(--line-strong);
-  display: grid;
-  place-items: center;
-  color: var(--text-dim);
-  margin-bottom: clamp(2px, 0.7vh, 8px);
-}
-
 .dropzone__title { font-size: 15px; }
 
 .dropzone__hint { color: var(--text-muted); font-size: 12.5px; }
 
 .btn-accent {
   margin-top: clamp(10px, 2.2vh, 22px);
+  display: inline-flex;
+  align-items: center;
+  /* The arrow's viewBox carries its own padding, so the gap is set tighter
+     than it looks to land at an even optical distance from the label. */
+  gap: 5px;
   border: 0;
   border-radius: 999px;
   padding: 10px 26px;
@@ -238,6 +232,8 @@ a { color: inherit; }
   cursor: pointer;
   transition: filter 0.18s var(--ease), transform 0.18s var(--ease);
 }
+
+.btn-accent svg { flex: none; transform: translateY(0.5px); }
 
 .btn-accent:hover { filter: brightness(1.07); }
 
