@@ -54,6 +54,10 @@ REASON_VINTAGE_REVISION = "vintage_revision"
 REASON_UNIT_MISSING = "unit_missing"
 REASON_UNIT_INCOMPARABLE = "unit_incomparable"
 
+# Values differ, but one side left a condition unstated that could account for
+# it. Not agreement, and not a contradiction either.
+REASON_CONTEXT_UNSTATED = "context_unstated"
+
 # Which context field decides the reason when more than one differs. Period is
 # the most fundamental: a figure for a different span of time is a different
 # figure whatever else also changed.
@@ -94,6 +98,7 @@ class Verdict:
     reason_text: str
     confidence: float
     differing_fields: list[str] = field(default_factory=list)
+    unstated_fields: list[str] = field(default_factory=list)
     match_score: float = 1.0
     adjudicated: bool = False
 
@@ -113,6 +118,7 @@ class Verdict:
             "reason_text": self.reason_text,
             "confidence": round(self.confidence, 4),
             "differing_fields": self.differing_fields,
+            "unstated_fields": self.unstated_fields,
             "match_score": round(self.match_score, 4),
             "adjudicated": self.adjudicated,
         }
@@ -240,6 +246,14 @@ def default_reason_text(verdict: Verdict) -> str:
             "both resolve to the same value."
         )
 
+    if code == REASON_CONTEXT_UNSTATED:
+        missing = " and ".join(verdict.unstated_fields) or "context"
+        return (
+            f"{left} and {right} differ, but only one of them states its "
+            f"{missing}, which could account for the gap. Not enough to call it "
+            "a conflict."
+        )
+
     if code == REASON_SAME_VALUE:
         return f"Both report {left} and {right} for {_describe_period(first)}, which agree."
 
@@ -258,7 +272,13 @@ def judge(pair: CandidatePair) -> Verdict:
     first, second = pair.fact_a, pair.fact_b
     base_confidence = min(first.confidence, second.confidence) * pair.score
 
-    def build(verdict: str, code: str, *, differing: list[str] | None = None) -> Verdict:
+    def build(
+        verdict: str,
+        code: str,
+        *,
+        differing: list[str] | None = None,
+        unstated: list[str] | None = None,
+    ) -> Verdict:
         result = Verdict(
             fact_a=first,
             fact_b=second,
@@ -267,6 +287,7 @@ def judge(pair: CandidatePair) -> Verdict:
             reason_text="",
             confidence=base_confidence,
             differing_fields=differing or [],
+            unstated_fields=unstated or [],
             match_score=pair.score,
         )
         result.reason_text = default_reason_text(result)
@@ -282,11 +303,9 @@ def judge(pair: CandidatePair) -> Verdict:
     # 2. Context. Facts holding under different conditions are reconcilable,
     #    however far apart the numbers are.
     signature_a, signature_b = first.signature, second.signature
-    differing = (
-        signature_a.differing_fields(signature_b)
-        if signature_a and signature_b
-        else []
-    )
+    have_both = signature_a is not None and signature_b is not None
+    differing = signature_a.differing_fields(signature_b) if have_both else []
+    unstated = signature_a.unstated_fields(signature_b) if have_both else []
 
     if differing:
         for field_name in FIELD_PRECEDENCE:
@@ -325,7 +344,12 @@ def judge(pair: CandidatePair) -> Verdict:
             if _units_written_differently(first, second)
             else REASON_SAME_VALUE
         )
-        return build(VERDICT_CORROBORATE, code)
+        return build(VERDICT_CORROBORATE, code, unstated=unstated)
+
+    # The values disagree. A condition only one side stated may be exactly what
+    # explains that, so an unstated field bars a contradiction.
+    if unstated:
+        return build(VERDICT_NO_VERDICT, REASON_CONTEXT_UNSTATED, unstated=unstated)
 
     return build(VERDICT_CONTRADICT, REASON_VALUE_CONFLICT)
 

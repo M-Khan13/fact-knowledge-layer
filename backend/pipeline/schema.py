@@ -35,21 +35,53 @@ class ContextSignature:
     def key(self) -> tuple:
         return (self.period.signature(), self.scope, self.basis, self.vintage)
 
+    def _pairs(self, other: ContextSignature):
+        yield "period", self.period.raw or None, other.period.raw or None
+        yield "scope", self.scope, other.scope
+        yield "basis", self.basis, other.basis
+        yield "vintage", self.vintage, other.vintage
+
     def differing_fields(self, other: ContextSignature) -> list[str]:
-        """Which context fields disagree, in the order the rules consider them."""
+        """Which context fields actually disagree.
+
+        Only fields both sides state count. A field one document fills in and
+        the other leaves silent is not a disagreement - the silent document has
+        not claimed anything to disagree with - so it is reported separately by
+        `unstated_fields`.
+        """
         differences = []
-        if self.period.signature() != other.period.signature():
+
+        mine, theirs = self.period, other.period
+        if mine.is_resolved and theirs.is_resolved and mine.signature() != theirs.signature():
             differences.append("period")
-        if self.scope != other.scope:
+        if self.scope and other.scope and self.scope != other.scope:
             differences.append("scope")
         # Bases are compared by the axes they actually pin down, so a figure
         # described as "real" and one described as "at market prices" are not
         # treated as measuring different things.
-        if basis_rules.conflict(self.basis, other.basis):
+        if self.basis and other.basis and basis_rules.conflict(self.basis, other.basis):
             differences.append("basis")
-        if self.vintage != other.vintage:
+        if self.vintage and other.vintage and self.vintage != other.vintage:
             differences.append("vintage")
         return differences
+
+    def unstated_fields(self, other: ContextSignature) -> list[str]:
+        """Fields one side states and the other leaves silent.
+
+        Not a disagreement, but not nothing either: an unstated condition may be
+        the very thing that explains a difference in the values, so a pair
+        carrying one must never be called a contradiction.
+        """
+        unstated = []
+        mine, theirs = self.period, other.period
+        if mine.is_resolved != theirs.is_resolved:
+            unstated.append("period")
+        for name, left, right in self._pairs(other):
+            if name == "period":
+                continue
+            if bool(left) != bool(right):
+                unstated.append(name)
+        return unstated
 
     def matches(self, other: ContextSignature) -> bool:
         return not self.differing_fields(other)

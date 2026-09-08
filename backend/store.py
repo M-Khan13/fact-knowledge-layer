@@ -243,6 +243,9 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
             sig_scope, sig_basis, sig_vintage, normalized
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(fact_id) DO UPDATE SET
+            -- Re-normalizing can tie a subject to an identifier it did not have
+            -- before, so the resolved key has to be updatable.
+            subject_key     = excluded.subject_key,
             value_num       = excluded.value_num,
             unit            = excluded.unit,
             context_period  = excluded.context_period,

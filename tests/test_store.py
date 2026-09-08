@@ -158,3 +158,14 @@ def test_a_database_from_an_earlier_version_is_upgraded(tmp_path):
         assert store.list_facts(conn, "anything") == []
     finally:
         conn.close()
+
+
+def test_a_resolved_subject_key_can_be_updated(db, fixture_path, parsed_doc):
+    """Re-normalizing may tie a subject to an identifier it did not have before."""
+    report = ingest(db, fixture_path, parsed_doc)
+    fact = report.facts[0]
+
+    fact.subject_key = "DIN:01173669"
+    store.save_facts(db, [fact])
+
+    assert store.get_fact(db, fact.fact_id).subject_key == "DIN:01173669"

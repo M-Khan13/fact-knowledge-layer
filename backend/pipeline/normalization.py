@@ -230,11 +230,56 @@ def resolve_self_references(facts: list[Fact]) -> list[Fact]:
     return facts
 
 
+def bind_strong_keys(facts: list[Fact]) -> list[Fact]:
+    """Upgrade name-based subjects to an identifier the document states for them.
+
+    A filing records a director's identification number as a fact of its own,
+    and separately records facts about that director by name. Those are the same
+    person, and only the identifier says so reliably. Where one fact states an
+    identifier for a subject, every fact about that subject is re-keyed to it,
+    so a name in one document and an identifier in another meet.
+
+    The mapping is built from the subject's *name*, not from its current key:
+    the fact that states the identifier has usually already been re-keyed by it,
+    which would otherwise hide the very link being looked for.
+
+    A name that two different identifiers claim is left alone. That is the
+    table row-bleed case, where one row's identifier lands beside the next row's
+    name, and picking a winner would invent an identity.
+    """
+    claims: dict[str, set[str]] = {}
+    for fact in facts:
+        stated = entities.identifier_stated_by(
+            fact.attribute, fact.value_raw, fact.evidence_span
+        )
+        if not stated:
+            continue
+        name = entities.normalize_name(fact.subject or "")
+        if name:
+            claims.setdefault(f"name:{name}", set()).add(stated)
+
+    upgrades = {
+        key: identifiers.pop()
+        for key, identifiers in claims.items()
+        if len(identifiers) == 1
+    }
+    if not upgrades:
+        return facts
+
+    for fact in facts:
+        replacement = upgrades.get(fact.subject_key or "")
+        if replacement:
+            fact.subject_key = replacement
+
+    return facts
+
+
 def normalize_facts(facts: list[Fact]) -> list[Fact]:
-    """Normalize a batch, then resolve self-references across each document."""
+    """Normalize a batch, resolve self-references, then bind stated identifiers."""
     for fact in facts:
         normalize_fact(fact)
-    return resolve_self_references(facts)
+    resolve_self_references(facts)
+    return bind_strong_keys(facts)
 
 
 def is_comparable(first: Fact, second: Fact) -> bool:

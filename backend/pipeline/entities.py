@@ -150,6 +150,50 @@ def resolve_subject_key(
     return f"name:{normalized}" if normalized else None
 
 
+# An attribute whose whole job is to carry an official identifier. Matched by
+# what the attribute is called, not by any particular document's wording.
+IDENTIFIER_ATTRIBUTE_RE = re.compile(
+    r"\b(din|cin|identification[_\s-]?(?:no|number)|identity[_\s-]?(?:no|number)"
+    r"|registration[_\s-]?(?:no|number))\b",
+    re.IGNORECASE,
+)
+
+BARE_DIN_RE = re.compile(r"^\s*([0-9]{8})\s*$")
+BARE_CIN_RE = re.compile(r"^\s*([LU][0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6})\s*$", re.IGNORECASE)
+
+
+def identifier_stated_by(
+    attribute: str | None, value_raw: str | None, *evidence: str | None
+) -> str | None:
+    """The official identifier a fact states, if that is what the fact is for.
+
+    A document often records a person's identifier as a fact in its own right -
+    "DIN: 01173669" - separately from the facts about that person. Reading it
+    here lets those facts be tied to the same entity as ones that name the
+    identifier directly.
+    """
+    din = find_din(*evidence)
+    if din:
+        return f"DIN:{din}"
+    cin = find_cin(*evidence)
+    if cin:
+        return f"CIN:{cin}"
+
+    # The attribute says it holds an identifier, and the value is shaped like one.
+    # Separators are flattened first: underscores are word characters, so
+    # "director_identification_number" has no word boundary before "identification".
+    flattened = re.sub(r"[_\-]+", " ", attribute or "")
+    if flattened and IDENTIFIER_ATTRIBUTE_RE.search(flattened):
+        value = value_raw or ""
+        bare_cin = BARE_CIN_RE.match(value)
+        if bare_cin:
+            return f"CIN:{bare_cin.group(1).upper()}"
+        bare_din = BARE_DIN_RE.match(value)
+        if bare_din:
+            return f"DIN:{bare_din.group(1)}"
+    return None
+
+
 def dominant_entity(subject_keys: list[str]) -> str | None:
     """The entity a document is mostly about, used to bind self-references."""
     named = [key for key in subject_keys if key]
