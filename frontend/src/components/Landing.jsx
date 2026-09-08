@@ -80,7 +80,8 @@ export default function Landing() {
         {/*
           Ingestion is a write path, and this interface is read-only, so the
           drop zone is shown as the design has it but left inert rather than
-          wired to POST /collections/{id}/documents.
+          wired to POST /collections/{id}/documents. The button's title says so
+          on hover, since the note that said it on screen has been removed.
         */}
         <div className="dropzone">
           <div className="dropzone__inner">
@@ -97,13 +98,15 @@ export default function Landing() {
             </div>
             <div className="dropzone__title">Drop PDFs here</div>
             <div className="dropzone__hint">or choose files · up to 50 documents</div>
-            <button type="button" className="btn-accent" aria-disabled="true" disabled>
+            <button
+              type="button"
+              className="btn-accent"
+              aria-disabled="true"
+              disabled
+              title="Ingestion runs offline through scripts/ingest.py; this interface only reads."
+            >
               Upload
             </button>
-            <p className="dropzone__note">
-              Ingestion runs offline through <code>scripts/ingest.py</code>; this
-              interface only reads.
-            </p>
           </div>
         </div>
 
