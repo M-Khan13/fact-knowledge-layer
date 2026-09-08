@@ -65,7 +65,7 @@ status" is.
 All four are demonstrated on the real starter data (Delhivery filings and Indian macroeconomic
 reports), visible in the Relationships view.
 
-![Relationships](docs/relationships.png)
+![Relationships](docs/relation.png)
 
 1. **Corroboration, expressed differently** — India's FY25 real GDP growth is reported as ~6.5% by
    the IMF, RBI and the Economic Survey across three different notations for the same fiscal year;
