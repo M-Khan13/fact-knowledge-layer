@@ -8,8 +8,9 @@ any claim the system makes can be checked against the source document.
 
 ## Status
 
-Phase 7 — the pipeline runs end to end behind a REST API, and extraction can
-be scored against a hand-labelled fact set. The React UI is not built yet.
+Phase 8 — the pipeline runs end to end behind a REST API, extraction can be
+scored against a hand-labelled fact set, and a React interface reads the
+collections, facts, relationships and page evidence the API serves.
 
 ## Layout
 
@@ -22,6 +23,7 @@ backend/evaluation.py  Scoring extraction against hand-labelled facts
 scripts/            Hand tools for inspecting the pipeline
 data/               Local SQLite database and uploaded PDFs (git-ignored)
 tests/              Unit tests, and the sample PDF they run against
+frontend/           React (Vite) interface over the read side of the API
 ```
 
 ## Grounding
@@ -213,12 +215,50 @@ key is ever logged or returned by an endpoint.
 
 ## Run
 
+The API and the interface are two processes. Start each in its own terminal,
+from the repository root:
+
 ```bash
+# Terminal 1 — API on :8000
+source .venv/bin/activate
 uvicorn backend.app:app --reload
+
+# Terminal 2 — interface on :5173
+cd frontend
+npm install        # first time only
+npm run dev
 ```
+
+Then open http://localhost:5173.
+
+The interface calls the API across origins, so the API must be running first
+and its `CORS_ORIGINS` must name the dev server's origin — the default already
+covers `http://localhost:5173`. Point the interface somewhere else by setting
+`VITE_API_BASE_URL` in `frontend/.env`; it defaults to `http://localhost:8000`.
 
 Interactive API docs are at `/docs`, and `/` is a bare debug view listing
 collections, their relationships and links to the evidence images.
+
+## Interface
+
+Three screens, all of them read-only — the interface issues `GET` requests and
+nothing else, so nothing it does can alter a collection. Ingestion stays a
+deliberate offline step through `scripts/ingest.py`.
+
+A collection opens on its facts — subject, attribute, value, period and source
+document — filterable as you type, and its relationships below, each pair drawn
+with the verdict reconciliation reached and the reason behind it.
+
+`View source` on any fact opens the evidence panel: the page that fact came
+from, rendered by the API as a PNG with the supporting span boxed, beside the
+document name and page number. The open fact is held in the URL, so a piece of
+evidence can be linked to and the back button closes the panel.
+
+Values are shown as the document printed them. A unit is appended only where
+the page did not already state it, so `10.94%` is left alone while a bare
+`28,367.97` is shown as `₹28,367.97 million`. A fact normalization could not
+resolve a unit for is a category rather than a measurement, and is shown as
+written.
 
 ## API
 
