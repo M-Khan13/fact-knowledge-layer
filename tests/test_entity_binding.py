@@ -97,3 +97,48 @@ def test_binding_works_even_though_the_identifier_fact_re_keys_itself():
     bind_strong_keys([stating, about])
 
     assert about.subject_key == "DIN:01173669"
+
+
+# --- A self-reference stands for the organisation, never a person ----------
+
+
+def test_a_key_says_what_kind_of_entity_it_identifies():
+    from backend.pipeline.entities import ORGANISATION, PERSON, entity_kind
+
+    assert entity_kind("DIN:01173669") == PERSON
+    assert entity_kind("CIN:L63090DL2011PLC221234") == ORGANISATION
+    assert entity_kind("name:acme") is None
+    assert entity_kind(None) is None
+
+
+def test_a_self_reference_never_binds_to_a_director():
+    """A filing full of directors' numbers still is not a director."""
+    from backend.pipeline.entities import ORGANISATION, dominant_entity
+
+    keys = ["DIN:01173669", "DIN:01432123", "name:acme logistics", "name:acme logistics"]
+
+    assert dominant_entity(keys, kind=ORGANISATION) == "name:acme logistics"
+    assert dominant_entity(keys) == "DIN:01173669", "unrestricted, the strongest wins"
+
+
+def test_a_self_reference_prefers_a_company_identifier_when_there_is_one():
+    from backend.pipeline.entities import ORGANISATION, dominant_entity
+
+    keys = ["DIN:01173669", "CIN:L63090DL2011PLC221234", "name:acme"]
+
+    assert dominant_entity(keys, kind=ORGANISATION) == "CIN:L63090DL2011PLC221234"
+
+
+def test_the_group_is_not_bound_to_a_directors_number():
+    from backend.pipeline.normalization import resolve_self_references
+
+    facts = [
+        make("designation", "Director", subject="A Director", evidence="DIN: 01173669"),
+        make("revenue", "100", subject="Acme Logistics Limited"),
+        make("lease_liabilities", "13,820.08", subject="The Group"),
+    ]
+
+    resolve_self_references(facts)
+
+    assert facts[2].subject_key == "name:acme logistics"
+    assert facts[0].subject_key == "DIN:01173669", "the director keeps their own key"

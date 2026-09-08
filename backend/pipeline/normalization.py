@@ -220,11 +220,14 @@ def resolve_self_references(facts: list[Fact]) -> list[Fact]:
             for fact in document_facts
             if fact.subject_key and not entities.is_self_reference(fact.subject)
         ]
-        main = entities.dominant_entity(named)
-        if not main:
-            continue
         for fact in document_facts:
-            if entities.is_self_reference(fact.subject):
+            kind = entities.self_reference_kind(fact.subject or "")
+            if kind is None:
+                continue
+            # Resolved per kind: a document naming its directors is full of
+            # person identifiers, and "the Group" is not one of them.
+            main = entities.dominant_entity(named, kind=kind)
+            if main:
                 fact.subject_key = main
 
     return facts

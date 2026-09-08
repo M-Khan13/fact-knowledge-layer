@@ -44,6 +44,24 @@ SELF_REFERENCES = {
 
 HONORIFICS = {"mr", "mrs", "ms", "miss", "dr", "prof", "shri", "smt", "sri", "sh"}
 
+# What kind of thing a key identifies. This is inherent in the identifier
+# itself: a Director Identification Number names a person, a Corporate Identity
+# Number names an organisation. A name says nothing either way.
+PERSON = "person"
+ORGANISATION = "organisation"
+
+KEY_KINDS: dict[str, str] = {"DIN:": PERSON, "CIN:": ORGANISATION}
+
+
+def entity_kind(subject_key: str | None) -> str | None:
+    """What kind of entity a key identifies, where the key says so."""
+    if not subject_key:
+        return None
+    for prefix, kind in KEY_KINDS.items():
+        if subject_key.startswith(prefix):
+            return kind
+    return None
+
 
 def find_din(*texts: str | None) -> str | None:
     """The first Director Identification Number stated in the given text."""
@@ -93,6 +111,15 @@ def is_self_reference(subject: str) -> bool:
     cleaned = re.sub(r"[^\w\s]", " ", (subject or "").lower())
     cleaned = " ".join(cleaned.split())
     return cleaned in SELF_REFERENCES
+
+
+def self_reference_kind(subject: str) -> str | None:
+    """What kind of entity an oblique self-reference stands for.
+
+    "the Company", "the Group", "the Bank" are all the reporting organisation.
+    A filing never calls itself a person, so these must never bind to one.
+    """
+    return ORGANISATION if is_self_reference(subject) else None
 
 
 def normalize_address(address: str) -> str:
@@ -194,13 +221,23 @@ def identifier_stated_by(
     return None
 
 
-def dominant_entity(subject_keys: list[str]) -> str | None:
-    """The entity a document is mostly about, used to bind self-references."""
-    named = [key for key in subject_keys if key]
-    if not named:
+def dominant_entity(subject_keys: list[str], kind: str | None = None) -> str | None:
+    """The entity a document is mostly about, used to bind self-references.
+
+    ``kind`` restricts the answer to entities that could be the thing being
+    referred to. A filing that names its directors carries their identification
+    numbers, and those are the strongest keys in the document - but "the Group"
+    is not a director, so a key of the wrong kind is not a candidate at all.
+    """
+    candidates = [key for key in subject_keys if key]
+    if kind is not None:
+        candidates = [
+            key for key in candidates if entity_kind(key) in (None, kind)
+        ]
+    if not candidates:
         return None
 
     # A stated identifier outranks a name, however often the name appears.
-    strong = [key for key in named if not key.startswith("name:")]
-    pool = strong or named
+    strong = [key for key in candidates if entity_kind(key) is not None]
+    pool = strong or candidates
     return Counter(pool).most_common(1)[0][0]
