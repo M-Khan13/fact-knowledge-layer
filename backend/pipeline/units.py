@@ -120,9 +120,16 @@ def parse_number(value: str | None) -> float | None:
     if not text:
         return None
 
+    # Accounting notation: a figure in parentheses is negative. The brackets
+    # close around the number, not around the whole string, so a trailing unit
+    # must not hide the sign - "(452) Cr" is a loss of 452 crore, not a gain.
     negative = False
-    # Accounting notation: a figure in parentheses is negative.
-    if text.startswith("(") and text.endswith(")"):
+    bracketed = re.search(r"\(\s*(\d[\d,\s]*(?:\.\d+)?)\s*\)", text)
+    if bracketed:
+        negative = True
+        text = text[: bracketed.start()] + bracketed.group(1) + text[bracketed.end() :]
+    elif text.startswith("(") and text.endswith(")"):
+        # A bracketed figure carrying something the number pattern misses, "(6.3%)".
         negative = True
         text = text[1:-1].strip()
 

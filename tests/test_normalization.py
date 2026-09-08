@@ -444,3 +444,15 @@ def test_signatures_report_which_field_differs():
     assert consolidated.matches(build_signature("FY 2023-24", "consolidated", "revenue", None))
     assert consolidated.differing_fields(standalone) == ["scope"]
     assert consolidated.differing_fields(quarterly) == ["period"]
+
+
+def test_a_bracketed_negative_survives_a_trailing_unit():
+    """"(452) Cr" is a loss of 452 crore. Losing the sign misstates the figure."""
+    assert parse_number("(452)") == -452
+    assert parse_number("(452) Cr") == -452
+    assert parse_number("(1,234.5) mn") == -1234.5
+    assert parse_number("(6.3%)") == -6.3
+    assert parse_number("₹(452) Cr") == -452
+    # Unbracketed figures are untouched.
+    assert parse_number("452 Cr") == 452
+    assert parse_number("8,142") == 8142
