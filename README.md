@@ -1,358 +1,203 @@
 # Fact Knowledge Layer
 
-Ingests PDFs, extracts grounded facts, and detects when facts across documents
-corroborate, contradict, or reconcile through context.
+A system that reads a set of PDFs, pulls out the facts stated in them, ties every fact back to
+the exact sentence it came from, and works out where those facts agree, disagree, or only *look*
+like they disagree.
 
-Every fact is tied back to the page and the exact span of text it came from, so
-any claim the system makes can be checked against the source document.
+It is built around one idea: the hard part isn't extracting facts, it's deciding whether two
+facts that look different are actually in conflict. ₹8,142 Cr and ₹81,415.38 million are the
+same number. FY24 revenue and Q4 FY24 revenue are not a contradiction. A director who is "active"
+in a 2022 prospectus and "resigned" in a 2024 report genuinely conflicts. Telling these apart is
+the whole game, and it's what this system spends most of its effort on.
 
-## Status
+![Landing page](docs/landing.png)
 
-Phase 8 — the pipeline runs end to end behind a REST API, extraction can be
-scored against a hand-labelled fact set, and a React interface reads the
-collections, facts, relationships and page evidence the API serves.
+## The problem
 
-## Layout
+Facts that matter are scattered across documents, written differently in each, sometimes backed
+up by other sources and sometimes contradicted. A revenue figure in a prospectus, an annual
+report, and an earnings deck will rarely match exactly — they cover different periods, use
+different units (₹ crore vs ₹ million), or report on a different scope (standalone vs
+consolidated). A naive comparison flags all of these as contradictions. The interesting work is
+separating a real conflict from a difference that context explains.
 
-```
-backend/            FastAPI app and configuration
-backend/pipeline/   Ingestion pipeline: parsing, grounding, extraction,
-                    normalization, matching, reconciliation
-backend/app.py      REST API and a minimal debug view
-backend/evaluation.py  Scoring extraction against hand-labelled facts
-scripts/            Hand tools for inspecting the pipeline
-data/               Local SQLite database and uploaded PDFs (git-ignored)
-tests/              Unit tests, and the sample PDF they run against
-frontend/           React (Vite) interface over the read side of the API
-```
+## Approach and architecture
 
-## Grounding
+The system is a pipeline, not a chatbot. A document goes through six stages:
 
-A fact is only worth as much as the evidence behind it, so page numbers and
-bounding boxes are never taken from a model. The extractor proposes a fact and
-a verbatim quote; `ground()` then searches the parsed PDF for that quote and
-reports where it physically sits. Three strategies run in order of how much
-they can be trusted:
+**parse → extract → ground → normalize → match → reconcile**
 
-| Strategy | Catches |
-|---|---|
-| `search_for` | PyMuPDF's own search, including quotes that wrap across lines |
-| `normalized` | quotes differing only in curly quotes, dashes, ligatures or spacing |
-| `fuzzy` | light paraphrase or OCR drift, accepted only above a similarity floor |
+1. **Parse** — PyMuPDF pulls per-page text and per-word coordinates; pdfplumber handles tables.
+2. **Extract** — each page is sent to Gemini with a strict prompt that returns structured facts,
+   each carrying a verbatim quote of the sentence it came from.
+3. **Ground** — the verbatim quote is located back in the page with PyMuPDF's `search_for`, which
+   gives the page number and a bounding box. This step is deterministic — the page location comes
+   from code searching the real text, never from the model. If a quote isn't found verbatim on the
+   page, the fact is dropped. That is what makes the evidence trustworthy.
+4. **Normalize** — this is the core. Every fact is split into a **value** and a **context
+   signature**: `{period, scope, basis, vintage}`. Units are canonicalised to a base (₹ Cr, ₹
+   million and ₹ lakh all resolve to plain rupees). Periods are parsed into a structure that knows
+   `FY24`, `Q4 FY24`, `2024-25` and `FY2024/25` and can tell that a quarter sits *inside* a year.
+5. **Match** — facts about the same subject and attribute are paired, but only across different
+   documents (a document agreeing with itself isn't news). Matching is three layers: deterministic
+   blocking on strong keys (a director's DIN, a company's CIN must match exactly — similar names
+   never override that), embeddings only to catch spelling and wording variants of weak name keys,
+   and deterministic-first per-pair scoring with an embedding fallback.
+6. **Reconcile** — for each pair, the verdict is decided by **deterministic rules over the context
+   signature**, not by the model. Same context and equal values → corroborate. Same context,
+   different values → contradict. Different context → reconcilable, and the reason names exactly
+   which field differs (period, scope, basis, or vintage). A language model only ever rewrites the
+   one-line explanation into fluent English — it is explicitly barred from changing the verdict.
 
-A quote that matches nothing returns `None`. Refusing to place a quote is
-always preferred to inventing a page for it.
+The payoff of the context signature: "8,142 Cr" and "81,415.38 million" corroborate once units are
+resolved; "FY24 revenue" and "Q4 FY24 revenue" reconcile because a quarter is part of a year, not a
+disagreement with it; and two genuinely different values under identical context are flagged as a
+real contradiction.
 
-Page numbers are physical positions in the file. A page label is reported only
-when the PDF itself declares one — a number printed as ink on the page is not
-read, because guessing it would fabricate provenance.
+Nothing in the schema is document-specific. The `attribute` field is free text, so a new kind of
+fact simply appears as a new attribute — the system was never told what a "revenue" or a "board
+status" is.
 
-## Extraction
+![Facts feed](docs/facts.png)
 
-Each page is one request. The model is asked for a JSON array of facts and is
-told to copy `value_raw` exactly as written and to quote `evidence_span`
-verbatim from the page. It is explicitly not asked for a page number: that is
-grounding's job.
+### The four required cases
 
-A proposed fact becomes a stored fact only if its quote can be found in the
-document. Grounding is attempted on the page the quote came from first, so a
-sentence repeated across pages is not attributed to the wrong one. Anything
-that cannot be placed is dropped and counted, never stored with a guessed page.
+All four are demonstrated on the real starter data (Delhivery filings and Indian macroeconomic
+reports), visible in the Relationships view.
 
-Responses are parsed defensively — code fences stripped, an array recovered
-from surrounding prose, a single object or `{"facts": [...]}` wrapper accepted
-— and a page whose JSON will not parse is retried once before being reported
-as failed. Rate limits and transient server errors back off and retry. One bad
-page never costs the rest of the document.
+![Relationships](docs/relationships.png)
 
-`value_num` and the canonical unit stay empty here; normalization fills them.
+1. **Corroboration, expressed differently** — India's FY25 real GDP growth is reported as ~6.5% by
+   the IMF, RBI and the Economic Survey across three different notations for the same fiscal year;
+   the system maps them to one period and marks them corroborated. In the Delhivery set, FY24
+   consolidated revenue of ₹81,415.38 million (annual report) corroborates ₹8,142 Cr (earnings
+   deck) once units are resolved.
+2. **Genuine contradiction** — Suvir Suren Sujan is listed as an active Non-Executive Nominee
+   Director in the 2022 prospectus, but the FY24 annual report records his resignation (24 Aug
+   2023). Same person (matched on DIN), opposite board status → contradiction.
+3. **Apparent contradiction, reconciled by context** — Delhivery's FY24 revenue and its Q4 FY24
+   revenue differ roughly fourfold. The system reconciles them: a quarter is a subset of the year,
+   not a conflicting figure. Standalone vs consolidated revenue for the same year reconciles the
+   same way, on scope.
+4. **A failure I found** — see "What I got wrong" below; several are documented honestly rather
+   than hidden.
 
-## Normalization
+### Evidence
 
-A fact is a value plus the conditions under which that value holds. Those
-conditions — the **context signature** — are what comparison gates on, before
-anything is decided about the numbers. Most false contradictions come from
-comparing two figures that were never describing the same thing.
+Every fact links to its source. Clicking a fact renders the actual PDF page with the grounded
+sentence highlighted — the page location comes from the deterministic grounding step, so it's the
+real sentence, not a reconstruction.
 
-**Units.** Every value is stored in one base alongside the unit it was written
-in, so `8,142 ₹ Cr` and `81,415.38 ₹ million` become the same number and agree
-to within 0.006%. Unit-blind comparison is banned: a value whose unit cannot be
-resolved gets no unit rather than a guessed one, has its confidence capped, and
-can never be auto-contradicted. Units carry a *family*, and families never
-cross-compare, so a percentage cannot contradict a headcount and rupees cannot
-contradict dollars (no exchange rate is invented). A unit this code has never
-seen becomes a canonical token of its own, so an unfamiliar document still
-compares correctly with itself.
+![Evidence panel](docs/evidence.png)
 
-**Periods.** An Indian fiscal year runs April–March and is named for the year
-it ends in. `FY2024/25`, `2024-25` and `FY25` therefore resolve to one token,
-which is what lets different publishers line up at all. `year ended March 31,
-2024` resolves to FY24 and `quarter ended December 31, 2023` to Q3 FY24.
-Periods also nest: Q4 FY24 sits inside FY24, so a difference across that
-boundary is a part against a whole, not a disagreement.
+## Setup and run instructions
 
-**Scope, basis, vintage.** Scope resolves to consolidated or standalone. Basis
-stays free text, canonicalised but never constrained to a list. Vintage records
-how settled a figure is, ordered `advance_estimate < provisional < revised <
-final`, so a changed number across vintages is a revision rather than a
-conflict. Projections sit outside that order.
-
-**Entities.** Where a document states an official identifier — a DIN for a
-person, a CIN for a company — that decides identity, since it survives spelling
-differences a name does not. Both are matched by their published shape, not
-against any list of known entities. Otherwise the normalized legal name is
-used, with legal suffixes and honorifics dropped. A document's oblique
-self-references ("the Company", "your Company") bind to whichever entity that
-document actually names, worked out at runtime from its own facts.
-
-**Agreement.** Two same-context values agree within the larger of ±0.5%
-relative or one unit in the last reported decimal; percentage-style values use
-a flat ±0.1 point band instead.
-
-## Matching
-
-Matching proposes candidate pairs; it does not judge them. The only question is
-whether two facts are about the same subject and the same attribute — the
-verdict comes later, from the context signature.
-
-Pairs are always drawn **across different documents**. A document restating
-itself is not cross-document agreement, and counting it would inflate
-everything downstream.
-
-Subjects are blocked on their resolved key. A stated DIN or CIN is
-authoritative and must match exactly — two different DINs are two different
-people however alike the names look. Only weaker name-based keys may merge on
-similarity, which is where spelling variation actually occurs. Similarity is
-scored per pair, so a block widened to catch a variant spelling does not
-downgrade the pairs inside it that agree exactly.
-
-Attributes are free text, so two documents rarely name a measure identically.
-An exact match scores 1.0; otherwise similarity is measured by embedding. The
-threshold is set low enough to admit pairs differing only in a qualifier —
-"real GDP growth" against "nominal GDP growth" is one measure taken two ways,
-and it is the `basis` field, not the threshold, that separates them afterwards.
-
-Embeddings come from Gemini when a key is configured, and otherwise from a
-deterministic local embedder using feature hashing, so matching still works and
-stays reproducible offline. Vectors are cached by content in the database. The
-local fallback is lexical rather than semantic — it relates "forex reserves" to
-"foreign exchange reserves" but misses "CPI inflation" against "consumer price
-inflation" — so **the thresholds are calibrated for it and should be re-tuned
-against real embeddings**. Every threshold is a parameter for that reason.
-
-Matching is incremental: passing the new document's fact ids restricts results
-to pairs involving them, so adding a document never re-examines the pairs a
-collection already had.
-
-## Reconciliation
-
-Every verdict is reached deterministically. A model never chooses one — it only
-writes the sentence explaining a verdict already decided, and may lower the
-confidence on a marginal case. The reason code proves the logic; the reason
-text explains it.
-
-The order of checks is the design:
-
-1. **Units first.** Two values that cannot be compared are never contradicted,
-   whatever the numbers say. A missing or unresolvable unit gives `no-verdict` /
-   `unit_missing`; two units that both resolve but do not convert — a percentage
-   against rupees, or rupees against dollars — give `unit_incomparable`. The two
-   are kept apart because one is a gap in the source and the other a category
-   error, which are different things to go and fix.
-2. **Context next.** Facts holding under different conditions are
-   `reconcilable`, however far apart their values are.
-3. **Values last**, once the two facts are known to describe the same thing
-   under the same conditions.
-
-| Verdict | Reason code | When |
-|---|---|---|
-| `corroborate` | `same_value` | same context, values agree |
-| `corroborate` | `unit_diff_resolved` | agree once both units resolve to one base |
-| `contradict` | `value_conflict` | same context, values outside the band |
-| `reconcilable` | `period_subset` | one period contains the other |
-| `reconcilable` | `period_diff` | different, non-nested periods |
-| `reconcilable` | `scope_diff` | consolidated against standalone |
-| `reconcilable` | `basis_diff` | a different measure |
-| `reconcilable` | `vintage_revision` | same period at a different stage of revision |
-| `no-verdict` | `unit_missing` | one side states no unit that resolves |
-| `no-verdict` | `unit_incomparable` | both units resolve but do not convert |
-
-Where several context fields differ, period decides the reason — a figure for a
-different span of time is a different figure whatever else also changed — and
-every differing field is recorded alongside it.
-
-**The adjudicator's limits are enforced in code, not asked for in a prompt.** A
-reply proposing a different verdict is discarded; a confidence above the
-deterministic one is clamped down. Every relationship carries an explanation
-written by the rules before the model is ever called, so reconciliation works
-with no API key at all — adjudication only improves the wording.
-
-## Ingesting documents
+Requires Python 3.12+ and Node 18+. A Gemini API key is needed only to *ingest new documents* —
+the shipped database already contains the extracted facts, so the interface runs without a key.
 
 ```bash
-python scripts/ingest.py --collection macro --input ~/path/to/pdfs
-python scripts/ingest.py --collection macro --pdf one.pdf --pdf two.pdf --max-pages 5
-```
-
-Needs `GEMINI_API_KEY` in `.env`. Ingestion is per document and idempotent: a
-document already in the collection is skipped, and re-ingesting updates rows
-in place rather than duplicating them, so adding a document never rebuilds the
-collection. `--max-pages` is worth using while experimenting, since a full
-100-page report costs one model call per page.
-
-## Setup
-
-```bash
-python3 -m venv .venv
+# 1. Backend
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env      # then fill in GEMINI_API_KEY
-```
+# copy the env template and add your key (only needed for new ingestion)
+cp .env.example .env
+# edit .env -> GEMINI_API_KEY=...
 
-Secrets are read from `.env` via python-dotenv. `.env` is git-ignored and no
-key is ever logged or returned by an endpoint.
+# 2. Run the API (serves the included data/facts.db)
+uvicorn backend.app:app --reload          # http://localhost:8000  (/docs for the API)
 
-## Run
-
-The API and the interface are two processes. Start each in its own terminal,
-from the repository root:
-
-```bash
-# Terminal 1 — API on :8000
-source .venv/bin/activate
-uvicorn backend.app:app --reload
-
-# Terminal 2 — interface on :5173
+# 3. Run the UI, in a second terminal
 cd frontend
-npm install        # first time only
-npm run dev
+npm install
+npm run dev                                # http://localhost:5173
 ```
 
-Then open http://localhost:5173.
+Open http://localhost:5173. The two shipped collections (Delhivery, India macroeconomy) load
+immediately with their facts and relationships.
 
-The interface calls the API across origins, so the API must be running first
-and its `CORS_ORIGINS` must name the dev server's origin — the default already
-covers `http://localhost:5173`. Point the interface somewhere else by setting
-`VITE_API_BASE_URL` in `frontend/.env`; it defaults to `http://localhost:8000`.
-
-Interactive API docs are at `/docs`, and `/` is a bare debug view listing
-collections, their relationships and links to the evidence images.
-
-## Interface
-
-Three screens, all of them read-only — the interface issues `GET` requests and
-nothing else, so nothing it does can alter a collection. Ingestion stays a
-deliberate offline step through `scripts/ingest.py`.
-
-A collection opens on its facts — subject, attribute, value, period and source
-document — filterable as you type, and its relationships below, each pair drawn
-with the verdict reconciliation reached and the reason behind it.
-
-`View source` on any fact opens the evidence panel: the page that fact came
-from, rendered by the API as a PNG with the supporting span boxed, beside the
-document name and page number. The open fact is held in the URL, so a piece of
-evidence can be linked to and the back button closes the panel.
-
-Values are shown as the document printed them. A unit is appended only where
-the page did not already state it, so `10.94%` is left alone while a bare
-`28,367.97` is shown as `₹28,367.97 million`. A fact normalization could not
-resolve a unit for is a category rather than a measurement, and is shown as
-written.
-
-## API
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /collections` | Create a collection (or rename one) |
-| `GET /collections` | List collections with document and fact counts |
-| `GET /collections/{id}` | One collection, its documents and verdict counts |
-| `POST /collections/{id}/documents` | Upload one or more PDFs and run the pipeline |
-| `GET /collections/{id}/documents` | Documents in a collection |
-| `GET /collections/{id}/facts` | Facts, filterable by `subject`, `attribute`, `period`, `doc_id` |
-| `GET /collections/{id}/relationships` | Relationships, filterable by `verdict`, `reason_code`, `fact_id` |
-| `POST /collections/{id}/reconcile` | Re-run reconciliation over a whole collection |
-| `GET /facts/{id}` | One fact |
-| `GET /facts/{id}/evidence` | The fact's page as a PNG, with its evidence boxed |
-| `GET /health` | Liveness, and whether a key is configured |
-
-Uploading runs the pipeline **for that document only**: it is parsed,
-extracted, grounded and normalized, and then its new facts are matched against
-the facts the collection already holds. Nothing is rebuilt, so a collection
-stays cheap to add to. A document is identified by its content hash, so
-re-uploading the same file — under any name — is recognised rather than
-duplicated. Use `?max_pages=N` while experimenting.
+**Ingesting a new PDF** (needs a Gemini key, writes to a separate DB so the shipped data is never
+touched):
 
 ```bash
-curl -X POST localhost:8000/collections -H 'content-type: application/json' \
-     -d '{"collection_id": "macro"}'
-
-curl -X POST 'localhost:8000/collections/macro/documents?max_pages=5' \
-     -F files=@report-one.pdf -F files=@report-two.pdf
-
-curl 'localhost:8000/collections/macro/relationships?verdict=contradict'
-curl localhost:8000/facts/f_abc123def456/evidence --output evidence.png
+python scripts/ingest.py --collection mydocs \
+  --pdf /path/to/a.pdf --pdf /path/to/b.pdf \
+  --db data/mydocs.db --max-pages 5
 ```
 
-Processing is synchronous, and a full report is one model call per page — so a
-100-page upload is a long request. `max_pages` keeps it manageable; a job queue
-would be the next step if this needed to be interactive.
+Ingestion runs offline through this script by design — the web UI is read-only. Note that
+evidence rendering depends on the source PDFs staying at the path recorded at ingest time.
 
-To locate a quote in any PDF and save the highlighted page:
+## What I got wrong (and how I handled it)
 
-```bash
-python scripts/ground_quote.py --pdf path/to/report.pdf \
-    --quote "some sentence from the document" --out hit.png
-```
+I kept a running list of real failures found while building, because catching them is most of the
+point of a system like this. A few:
 
-With no `--pdf` it reads the first PDF in `--input`, falling back to `INPUT_DIR`
-from `.env`. No document path is baked into the code.
+- **Tests green, output wrong.** The reconciliation logic was correct, but the human-readable
+  reason for a period-subset case printed the part and whole backwards ("Q4 covers FY24"). Unit
+  tests passed while the sentence was wrong — only reading real output caught it. Fixed, with a
+  test that asserts the wording in both argument orderings.
+- **A budget cap that silently dropped facts.** Capping the model's thinking budget to save quota
+  made it walk past a multi-column revenue table entirely — it extracted the current-year columns
+  and skipped the prior year. Raising the cap recovered them. A clear trade-off: cheaper extraction
+  costs coverage on dense tables.
+- **A false contradiction from a schema conflation.** Two IMF figures for the same GDP growth read
+  as a contradiction because one was tagged `basis=real` and the other `basis=GDP at market
+  prices`. These aren't opposing values — they describe two different axes (a price basis and an
+  aggregate). I fixed it by treating a basis as a set of facets that conflict only when they
+  disagree on the *same* axis, rather than aliasing specific strings, so it generalises.
+- **A sign error on financial data.** `(452) Cr` — an accounting loss — parsed as +452 because the
+  parenthesis-negative rule broke when a unit trailed the number. On financial documents this is
+  the dangerous kind of bug; fixed and tested.
+- **A date read as a number.** `parse_number("August 24, 2023")` returned `242023` because the
+  digit-grouping pattern allowed a comma-space. This misclassified a resignation date as a
+  measurement. Fixed.
+- **A normalization pass reading its own output.** The board-status rule re-classified facts from
+  the attribute it had itself just written, silently erasing contradictions. Now it reads the
+  document's original attribute, with an idempotency test that runs it three times.
 
-## Test
+## Limitations and next steps
 
-```bash
-pytest
-```
+- **Gemini free tier caps everything.** The free tier allows ~20 requests/day, one call per page.
+  So the shipped data covers the ~26 pages where the demonstrated facts live, not all ~500 pages of
+  the six documents. This is a cost choice, not a design limit — the same pipeline handles a whole
+  document via the same endpoint. For the same reason, the web UI's upload box is disabled and
+  ingestion runs through the CLI; enabling live upload would call the model per page and burn the
+  daily quota on a single click.
+- **Why not a local embedder (Ollama etc.).** The system ships with an offline hashing embedder as
+  a fallback, but the primary path uses Gemini embeddings when a key is present. I chose not to
+  depend on a local model server (Ollama, sentence-transformers) because it would force whoever
+  runs this to install and pull a model before anything works — a real cost to "runs from my
+  instructions." The hashing fallback keeps it working with zero setup and zero network.
+- **Matching thresholds are calibrated for the offline embedder.** The similarity thresholds were
+  tuned against the lexical hashing embedder. With a Gemini key configured, embeddings shift to a
+  semantic scale and the thresholds should be re-tuned — a known calibration gap.
+- **Categorical conflicts sit outside the numeric guardrail.** Text-valued facts (like board
+  status) are compared on a separate categorical path, added deliberately so the director
+  contradiction could surface without weakening the rule that stops false *numeric* contradictions.
+- **Known extraction gaps.** On some multi-row tables the extractor keeps the subject varying per
+  row instead of the attribute; and the temporal parser handles "as of" but not every phrasing of a
+  date range. Both are documented rather than papered over.
+- **Next steps.** Table-aware extraction (parsing tables by column rather than flattened text) would
+  close most of the extraction gaps; a job queue would make large-PDF ingestion interactive; and
+  re-tuning the thresholds for semantic embeddings would improve matching once off the free tier.
 
-## Evaluating extraction
+## AI tools used
 
-```bash
-python scripts/evaluate.py --labels path/to/labels.json --input ~/path/to/pdfs
-```
+Built with Claude Code as a pair-programmer for the implementation, under close review at each
+phase — the schema, normalization rules, and every fact and verdict shown were designed and
+verified by me. Gemini is the only external model in the running system (extraction, the
+reason-text rewrite, and embeddings when a key is present).
 
-Labels come only from the file you point at. Nothing here invents one, and a
-missing file is an error rather than an empty run that appears to pass.
+## Additional notes
 
-The loader does not assume a layout. It inspects the JSON, maps whatever field
-names it finds onto the fields it needs, and reports the mapping it used, so a
-misread shape is visible rather than silent. It reads a plain list, a list
-under a wrapping key, or an object keyed by document name, and accepts common
-aliases (`metric`/`attribute`, `expected_value`/`value`, `units`/`unit`, and so
-on). Check how your file will be read before running anything:
-
-```bash
-python scripts/evaluate.py --labels path/to/labels.json --describe
-```
-
-Matching reuses the pipeline's own normalization, so a label written
-`8,142 ₹ Cr` matches a fact extracted as `81,415.38 ₹ million` for the same
-reason the reconciler would call them one figure. Each label is satisfied by at
-most one fact and each fact satisfies at most one label, so nothing is counted
-twice.
-
-Misses are separated by cause, because they need different fixes:
-
-- **found the attribute, disagreed on the value** — the report names the figure
-  the engine produced, which is usually the more useful failure;
-- **not extracted at all** — the engine never proposed anything for it.
-
-Two precision figures are reported. **Scoped precision** counts only unmatched
-facts whose attribute appears somewhere in the label set; **precision, all**
-counts every extracted fact. A hand-labelled set is rarely exhaustive, so the
-unscoped figure understates the engine whenever it correctly extracts something
-nobody labelled — read the scoped figure first and the listed facts to judge
-the rest.
-
-Where a label gives a page, a disagreement with the grounded page is reported
-separately: the fact still counts as found, but the discrepancy is worth
-seeing. `--json out.json` writes the whole result for tracking runs over time.
+- **Brownie points reached:** a dynamically-evolving schema (free-text attributes — new fact types
+  need no schema change), and many PDFs in one knowledge layer (collections pool facts and reconcile
+  across all documents in them). Ingestion is incremental — a new document appends its facts and is
+  matched against the existing pool.
+- **Git:** built in phases with a clean, single-contributor history.
+- **The shipped database is deliberately frozen.** Because extraction is non-deterministic and the
+  matching thresholds are calibrated for the embedder that produced the current verdicts, the
+  demonstrated relationships live in the committed `data/facts.db` and are best viewed as-is rather
+  than regenerated.
