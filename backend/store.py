@@ -272,6 +272,26 @@ def save_facts(conn: sqlite3.Connection, facts: Iterable[Fact]) -> int:
     return len(rows)
 
 
+def delete_facts(
+    conn: sqlite3.Connection, doc_id: str, pages: set[int] | None = None
+) -> int:
+    """Remove a document's facts, optionally only from certain pages.
+
+    Re-extracting a page must replace what was there. Fact ids are derived from
+    content, so without this a re-run leaves the previous attempt's facts behind
+    alongside the new ones.
+    """
+    if pages:
+        marks = ",".join("?" * len(pages))
+        cursor = conn.execute(
+            f"DELETE FROM facts WHERE doc_id = ? AND page IN ({marks})",
+            [doc_id, *sorted(pages)],
+        )
+    else:
+        cursor = conn.execute("DELETE FROM facts WHERE doc_id = ?", (doc_id,))
+    return cursor.rowcount
+
+
 def _row_to_fact(row: sqlite3.Row) -> Fact:
     return Fact(
         fact_id=row["fact_id"],

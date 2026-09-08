@@ -209,6 +209,10 @@ def ingest_pdf(
             page_count=doc.page_count,
         )
 
+        # Re-reading a page replaces what it produced before, rather than
+        # leaving the previous attempt's facts sitting alongside the new ones.
+        store.delete_facts(conn, doc_id, pages)
+
         selected = doc.pages
         if pages is not None:
             # Only the pages asked for, so a run can target where facts live

@@ -280,3 +280,46 @@ def test_a_finished_document_survives_a_later_failure(db, fixture_path, parsed_d
         assert store_module.count_facts(other, "sample") > 0
     finally:
         other.close()
+
+
+def test_re_extracting_a_page_replaces_its_facts(db, fixture_path, parsed_doc):
+    """A second attempt must not leave the first attempt's facts behind."""
+    page = parsed_doc.page(0)
+    entry = lambda value, start: json.dumps(
+        [
+            {
+                "subject": "Sample Entity",
+                "attribute": "measure",
+                "value_raw": value,
+                "evidence_span": quote_on(page, start, 12),
+                "confidence": 0.9,
+            }
+        ]
+    )
+
+    ingest_pdf(fixture_path, "sample", db, client=ScriptedClient([entry("1", 10)]), pages={1})
+    first = store.list_facts(db, "sample")
+
+    ingest_pdf(
+        fixture_path, "sample", db,
+        client=ScriptedClient([entry("2", 40)]), pages={1}, skip_if_present=False,
+    )
+    second = store.list_facts(db, "sample")
+
+    assert len(first) == 1 and len(second) == 1, "the old fact is gone, not kept"
+    assert second[0].value_raw == "2"
+
+
+def test_replacing_one_page_leaves_other_pages_alone(db, fixture_path, parsed_doc):
+    replies, _ = scripted_replies(parsed_doc)
+    ingest_pdf(fixture_path, "sample", db, client=ScriptedClient(replies))
+    before = {f.page for f in store.list_facts(db, "sample")}
+
+    ingest_pdf(
+        fixture_path, "sample", db,
+        client=ScriptedClient(["[]"]), pages={1}, skip_if_present=False,
+    )
+    after = {f.page for f in store.list_facts(db, "sample")}
+
+    assert 1 not in after, "the re-read page was cleared"
+    assert before - {1} == after, "every other page survived"
