@@ -79,9 +79,7 @@ reports), visible in the Relationships view.
    revenue differ roughly fourfold. The system reconciles them: a quarter is a subset of the year,
    not a conflicting figure. Standalone vs consolidated revenue for the same year reconciles the
    same way, on scope.
-4. **A failure I found** — see "What I got wrong" below; several are documented honestly rather
-   than hidden.
-
+4. **A failure I found** — see "What I got wrong" below; are documented.
 ### Evidence
 
 Every fact links to its source. Clicking a fact renders the actual PDF page with the grounded
@@ -182,13 +180,6 @@ point of a system like this. A few:
 - **Next steps.** Table-aware extraction (parsing tables by column rather than flattened text) would
   close most of the extraction gaps; a job queue would make large-PDF ingestion interactive; and
   re-tuning the thresholds for semantic embeddings would improve matching once off the free tier.
-
-## AI tools used
-
-Built with Claude Code as a pair-programmer for the implementation, under close review at each
-phase — the schema, normalization rules, and every fact and verdict shown were designed and
-verified by me. Gemini is the only external model in the running system (extraction, the
-reason-text rewrite, and embeddings when a key is present).
 
 ## Additional notes
 
